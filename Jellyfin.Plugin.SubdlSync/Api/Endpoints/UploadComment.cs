@@ -51,6 +51,29 @@ public static class UploadComment
         return Build(imdbId, tmdbId, string.Join(" / ", zweite), year);
     }
 
+    /// <summary>
+    /// Baut den Kommentar für einen Staffel-Pack (tvst): die Zeile nennt die Staffel statt der Folge,
+    /// der Folgentitel entfällt. Dieselbe Handschrift wie <see cref="Series"/>, damit Einzel- und
+    /// Pack-Upload nebeneinander lesbar bleiben — Beispiel:
+    /// <c>IMDb: tt33246591 / TMDb: 271087 — S02: The Assassin — 2025</c>.
+    /// </summary>
+    /// <param name="imdbId">IMDb-Kennung (Serie).</param>
+    /// <param name="tmdbId">TMDb-Kennung (Serie).</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="showTitle">Serientitel.</param>
+    /// <param name="year">Jahr des Titels, 0 wenn unbekannt.</param>
+    /// <returns>Der Kommentar.</returns>
+    public static string Season(string? imdbId, string? tmdbId, int season, string? showTitle, int year)
+    {
+        var zeile = "S" + season.ToString("D2", CultureInfo.InvariantCulture);
+        if (!string.IsNullOrWhiteSpace(showTitle))
+        {
+            zeile += ": " + showTitle.Trim();
+        }
+
+        return Build(imdbId, tmdbId, zeile, year);
+    }
+
     /// <summary>Baut den Kommentar für einen Film (die Folgezeile entfällt).</summary>
     /// <param name="imdbId">IMDb-Kennung.</param>
     /// <param name="tmdbId">TMDb-Kennung.</param>

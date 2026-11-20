@@ -331,6 +331,16 @@ public sealed class UploadPipeline : IPackFiller
     /// </summary>
     private Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>>? _allePacks;
 
+    /// <summary>
+    /// F-M643: derselbe Lauf-Cache, aber JE QUELLE. Die Karte von F-M571 nennt alle Pack-Zeilen ohne
+    /// Ansehen der Quelle; sobald zwei Quellen Packs bauen, ist das die falsche Antwort fuer den Plan
+    /// der jeweils anderen Quelle.
+    /// </summary>
+    private readonly Dictionary<(string ImdbId, int Season, string Source), HashSet<(string Language, bool HearingImpaired)>> _packsInSeasonSource = new();
+
+    /// <summary>F-M643: die Pack-Karten je Quelle, einmal je Lauf gelesen (Schwester von <see cref="_allePacks"/>).</summary>
+    private readonly Dictionary<string, Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>>> _allePacksSource = new();
+
     /// <summary>F-M575: Sprachen aller Staffeln, einmal je Lauf gelesen.</summary>
     private Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>>? _alleSprachen;
 
@@ -631,6 +641,8 @@ public sealed class UploadPipeline : IPackFiller
         _seasonEpisodes.Clear();
         _completeSeasonItems.Clear();
         _packsInSeason.Clear();
+        _packsInSeasonSource.Clear(); // F-M643: dieselbe Frische je Quelle
+        _allePacksSource.Clear();
         _packAbsorbed.Clear(); // F-M429: the memory of this run's packs, not the previous run's
 
         var items = CollectItems(_config.SelectedLibraries);
@@ -785,6 +797,10 @@ public sealed class UploadPipeline : IPackFiller
                 // die die Planung gerade berechnet hat (Luftzahl + Groesse + Speicherdatum je Folge).
                 packCoordinator.SeasonSignature =
                     (imdb, season) => _saisonSignatur.TryGetValue((imdb, season), out var sig) ? sig : string.Empty;
+
+                // F-M643: der Versand des Behälters der zweiten Quelle. Der Koordinator sammelt und
+                // prueft, der Lauf sendet — er kennt TMDb und die Seriennummer der Seite.
+                packCoordinator.TvSubtitlesSender = SendPackToTvSubtitlesAsync;
             }
         }
 
@@ -868,6 +884,44 @@ public sealed class UploadPipeline : IPackFiller
                         _logger,
                         "[Sub Scribe] pack did not go up for {Imdb} S{Season} [{Lang}] — the singles it was meant to carry go up in the single phase (F-M429).",
                         packImdb, packSeason, packLang);
+                }
+            }
+
+            // F-M643 (Betreiber-Vorgabe 20.11.2026: „Ja. Aber nur für den vollen lauf, refetch oder
+            // manuell"): seit heute baut auch tvsubtitles.net Staffel-Packs, und der Sammler der
+            // Mitglieder ist derselbe (F-M641/F-M642). Zwei Dinge gelten dabei woertlich:
+            //   • nur der VOLLE Lauf packt die Bibliothek — ein Ankunftslauf bringt seine eigenen Folgen
+            //     und laesst die Staffel dem naechsten vollen Lauf (F-M420),
+            //   • der Schalter ist der vorhandene `UploadSeasonPacks` (kein zweiter), und die Quelle
+            //     muss hochladen duerfen (ihr eigener Upload-Schalter, F-M495).
+            // Ein Paar ist immer EINE Sprache und EINE Variante — HI und plain werden nie gemischt, `hi`
+            // steht im Behälter also nur, wenn der ganze Pack HI ist.
+            if (!IsArrivalRun && SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
+            {
+                var tvstPaare = PlanPacksFromStore(completeSeasons, source: PackEntity.TvSubtitlesSource);
+                LogUtil.Detail(
+                    _logger,
+                    "[Sub Scribe] PACK — tvst phase: {Count} pair(s) to build (F-M643)",
+                    tvstPaare.Count);
+
+                foreach (var (packImdb, packSeason, packLang, packHi) in tvstPaare)
+                {
+                    // F-M640: dieselbe Zaehlung wie fuer SubDL — eine Staffel mit einem tvst-Paar hat
+                    // ihre Zeile, sie darf unten nicht zusaetzlich „nichts zu packen" melden.
+                    geplantProStaffel[(packImdb, packSeason)] =
+                        (geplantProStaffel.TryGetValue((packImdb, packSeason), out int schonTvst) ? schonTvst : 0) + 1;
+                    await packCoordinator
+                        .FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt, PackEntity.TvSubtitlesSource)
+                        .ConfigureAwait(false);
+
+                    if (!Registry.HasPack(packImdb, packSeason, packLang, packHi, PackEntity.TvSubtitlesSource)
+                        && !string.IsNullOrEmpty(packCoordinator.LastRefusal))
+                    {
+                        LogUtil.Detail(
+                            _logger,
+                            "[Sub Scribe] PACK — {Imdb} S{Season} [{Lang}] tvst: no container this run ({Reason}) (F-M643)",
+                            packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastRefusal);
+                    }
                 }
             }
 
@@ -5797,9 +5851,40 @@ public sealed class UploadPipeline : IPackFiller
         return pairs;
     }
 
+    /// <summary>
+    /// F-M643: dieselbe Staffelfrage, aber fuer EINE Quelle — mit eigenem Lauf-Cache. Seit
+    /// tvsubtitles.net ebenfalls Packs baut, ist die ungefilterte Antwort falsch: sie nennt auch Paare,
+    /// die nur bei der anderen Quelle gepackt sind. Die Abfrage je Paar bleibt aus (F-M571), nur der
+    /// Speicher ist ein zweiter.
+    /// </summary>
+    /// <param name="imdbId">Serie.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="source">Die Quelle, deren Packs gefragt sind.</param>
+    /// <returns>Die gepackten (Sprache, HI)-Paare dieser Quelle.</returns>
+    private HashSet<(string Language, bool HearingImpaired)> PacksOfSource(string imdbId, int season, string source)
+    {
+        var key = (imdbId, season, source);
+        if (!_packsInSeasonSource.TryGetValue(key, out var gepackt))
+        {
+            if (!_allePacksSource.TryGetValue(source, out var alle))
+            {
+                alle = Registry.PacksBySeason(source);
+                _allePacksSource[source] = alle;
+            }
+
+            gepackt = alle.TryGetValue((imdbId, season), out var vorhanden)
+                ? vorhanden
+                : new HashSet<(string Language, bool HearingImpaired)>();
+            _packsInSeasonSource[key] = gepackt;
+        }
+
+        return gepackt;
+    }
+
     private List<(string ImdbId, int Season, string Lang, bool Hi)> PlanPacksFromStore(
         IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlyList<int>> complete,
-        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlySet<int>>? onlyEpisodes = null)
+        IReadOnlyDictionary<(string ImdbId, int Season), IReadOnlySet<int>>? onlyEpisodes = null,
+        string source = PackEntity.SubdlSource)
     {
         var planned = new List<(string ImdbId, int Season, string Lang, bool Hi)>();
 
@@ -5880,7 +5965,12 @@ public sealed class UploadPipeline : IPackFiller
                 // alone looked "already packed" and was never packed at all. 98 seasons were reported
                 // as inside a pack that never existed.
                 // F-M571: dieselbe Staffelfrage wie im Sammler, keine zweite Abfrage je Paar.
-                if (PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((
+                // F-M643: die Frage gilt EINER Quelle — ein tvst-Pack macht den SubDL-Pack nicht
+                // ueberfluessig und umgekehrt.
+                var gepacktHier = source == PackEntity.SubdlSource
+                    ? PacksOf(entry.Key.Item1, entry.Key.Item2)
+                    : PacksOfSource(entry.Key.Item1, entry.Key.Item2, source);
+                if (gepacktHier.Contains((
                         Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical(pair.Key.Lang)
                             ?? (pair.Key.Lang ?? string.Empty).ToUpperInvariant(),
                         pair.Key.Hi)))
@@ -7029,6 +7119,156 @@ public sealed class UploadPipeline : IPackFiller
         @"^(episode|folge|ep\.?)\s*\d+$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
+    /// <summary>
+    /// F-M643 (Betreiber-Vorgabe 20.11.2026: „Ja. Aber nur für den vollen lauf, refetch oder manuell"):
+    /// sendet EINEN Staffel-Behälter an tvsubtitles.net. Der Behälter (Zip mit den Folgen-Dateinamen)
+    /// kommt fertig vom Sammler; hier stehen nur die Dinge, die der Sammler nicht wissen kann — der
+    /// Serientitel, die Nummer der Seite und der Endpunkt.
+    /// <para>
+    /// Die Reihenfolge ist die des Einzel-Uploads (F-M501/F-M608): Schalter der Quelle, Sprache der
+    /// Seite, TMDb-Pflicht, geschlossener Titel, Titel-Leiter, dann der Versand. Ein Behälter, für den
+    /// eine dieser Fragen „nein" sagt, wird NICHT gesendet und auch nicht als Fehlschlag gebucht — der
+    /// Grund reist als <see cref="UploadResult"/> zurück und steht als eine Zeile im Log.
+    /// </para>
+    /// <para>
+    /// `hi` reist als Feld des GANZEN Behälters mit: der Sammler bildet je (Sprache, Variante) einen
+    /// eigenen Pack, also ist ein Behälter nie halb HI (F-M641).
+    /// </para>
+    /// </summary>
+    /// <param name="uebergabe">Der fertige Behälter mit allem, was der Versand über die Staffel weiß.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Das Urteil des Endpunkts.</returns>
+    private async Task<UploadResult> SendPackToTvSubtitlesAsync(
+        SeasonPackCoordinator.TvPackTransfer uebergabe, CancellationToken ct)
+    {
+        // F-M495: der Upload-Schalter der QUELLE, nicht der des Laufs. Ist tvst nicht zum Hochladen
+        // freigeschaltet, wird kein Behälter gebaut — der Sammler hat dann umsonst gesammelt, aber
+        // nichts verlassen.
+        if (!SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))
+        {
+            return UploadResult.Skipped("second-source-switched-off");
+        }
+
+        // F-M538: die Seite fuehrt diese Sprache nicht — senden waere eine Ablehnung, die niemand
+        // erklaeren kann.
+        if (Api.TvSubtitlesClient.SiteLanguage(uebergabe.Lang) is null)
+        {
+            return UploadResult.Skipped("second-source-no-language");
+        }
+
+        // F-M501: ohne TMDb-Kennung gibt es keinen fuehrenden Titel — dann wird nicht geraten.
+        if (string.IsNullOrWhiteSpace(uebergabe.TmdbId))
+        {
+            return UploadResult.Skipped("second-source-no-tmdb-id");
+        }
+
+        var series = await _tmdb.SeriesInfoAsync(uebergabe.TmdbId!, ct).ConfigureAwait(false);
+        if (series is null)
+        {
+            return UploadResult.Skipped("second-source-no-series-record");
+        }
+
+        string tvstTitelId = !string.IsNullOrWhiteSpace(uebergabe.ImdbId)
+            ? uebergabe.ImdbId
+            : (uebergabe.TmdbId ?? uebergabe.MediaHash ?? string.Empty);
+
+        // F-M608/F-M619: ein Titel, der nach vier Fehlschlaegen geschlossen wurde, wird nicht wieder
+        // angelegt — weder fuer eine Folge noch fuer einen Behälter.
+        if (Jellyfin.Plugin.SubScribe.Registry.TitleFailureStore.IsClosed("tvsubtitles", tvstTitelId, out string tvstGesperrt)
+            || _titelGeschlossen.Contains("tvsubtitles|" + tvstTitelId))
+        {
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack [{Lang}] {Imdb} S{Season}: title {Title} is closed ({Reason}), nothing sent (F-M643)",
+                uebergabe.Lang, uebergabe.ImdbId, uebergabe.Season, tvstTitelId,
+                string.IsNullOrEmpty(tvstGesperrt) ? "closed in this run" : tvstGesperrt);
+            return UploadResult.Skipped("second-source-title-closed");
+        }
+
+        var (show, tvstGelungen, tvstGeschlossen) = await MitTitelLeiterAsync(
+                "tvsubtitles",
+                tvstTitelId,
+                () => _tvstShows.ResolveForMediaAsync(Registry, uebergabe.MediaHash, series, _config.DryRun, ct, uebergabe.MediaPath),
+                s => s.Resolved,
+                s => s.Status,
+                s => string.Equals(s.Status, Api.Endpoints.TvstShowStatus.CreatedIdUnknown, StringComparison.Ordinal),
+                s => string.Equals(s.Status, Api.Endpoints.TvstShowStatus.Unclear, StringComparison.Ordinal),
+                () => _tvstShows.BeginRun(),
+                ct)
+            .ConfigureAwait(false);
+
+        if (!show.Resolved)
+        {
+            // Eine angelegte Serie ohne lesbare Nummer ist fuer einen Behälter kein Beleg: der
+            // Staffel-Slot wird ueber die Nummer adressiert, und ohne sie gibt es keinen Slot. Also
+            // keine Marke, kein Senden — nur der Grund.
+            if (tvstGeschlossen)
+            {
+                _titelGeschlossen.Add("tvsubtitles|" + tvstTitelId);
+            }
+
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack [{Lang}] {Imdb} S{Season}: no show id at tvsubtitles.net ({Status}), nothing sent (F-M643)",
+                uebergabe.Lang, uebergabe.ImdbId, uebergabe.Season, show.Status);
+            return tvstGelungen
+                ? UploadResult.Skipped("second-source-show-" + show.Status)
+                : UploadResult.NoVerdict("second-source-title-no-verdict");
+        }
+
+        // F-M496/F-M641: der Endpunkt bekommt den Trockenlauf und den vorhandenen Pack-Schalter
+        // uebergeben; er liest die Konfiguration nicht selbst und lehnt einen Pack ab, wenn der
+        // Schalter aus ist.
+        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(
+            _tvstClient,
+            dryRun: _config.DryRun,
+            seasonPacks: _config.UploadSeasonPacks,
+            registry: Registry);
+
+        var ticket = new Api.Endpoints.UploadTicket(
+            series.Name,
+            uebergabe.ImdbId,
+            uebergabe.TmdbId,
+            uebergabe.Season,
+            // F-M641: der Staffel-Slot ist episode=0 — das ist keine Folge ohne Nummer, sondern die Staffel.
+            0,
+            uebergabe.Lang,
+            uebergabe.ZipName,
+            uebergabe.Zip,
+            // F-M498: die Seite kennt nur ihre sieben Rip-Werte.
+            TvSubtitlesClient.RipFromQuality(uebergabe.Quality),
+            // F-M641: der Pack-Name steht im release-Feld — es ist der einzige Name, den die Seite
+            // fuer den Behälter hat (kein Folgentitel, kein Kommentar mit Version).
+            uebergabe.Release,
+            uebergabe.Hi,
+            DoubleEpisode: false,
+            SeasonPack: true,
+            TvstShowId: show.ShowId,
+            EpisodeTitle: null,
+            // F-M574: das Jahr der ERSTAUSSTRAHLUNG der Serie, nicht das der Datei.
+            MovieYear: series.FirstAirYear ?? 0);
+
+        var answer = await endpoint.SendAsync(ticket, ct).ConfigureAwait(false);
+        LogUtil.Normal(
+            _logger,
+            string.IsNullOrEmpty(answer.Reason)
+                ? "[Sub Scribe] season pack [{Lang}] {Imdb} S{Season} as one .zip — {Result:l} at tvsubtitles.net (F-M643)"
+                : "[Sub Scribe] season pack [{Lang}] {Imdb} S{Season} as one .zip — {Result:l} at tvsubtitles.net: {Reason} (F-M643)",
+            uebergabe.Lang, uebergabe.ImdbId, uebergabe.Season,
+            answer.Ok ? "sent" : "refused",
+            answer.Reason);
+
+        if (answer.Ok)
+        {
+            return UploadResult.Success(answer.Id);
+        }
+
+        // F-M609: 429/5xx sind keine Ablehnung, sondern keine Antwort — die Position bleibt offen.
+        return IstStoerung(answer.Status)
+            ? UploadResult.NoVerdict(answer.Reason ?? "second-source-no-answer")
+            : UploadResult.Failed(answer.Reason ?? "second-source-refused");
+    }
+
     private async Task<UploadResult> SendToTvSubtitlesAsync(
         string srtContent, string neutralName, string lang, string releaseName, string quality,
         string? imdbId, string? tmdbId, bool isSeries, int season, int episode, bool hearingImpaired,
@@ -7148,7 +7388,15 @@ public sealed class UploadPipeline : IPackFiller
         // builds the same body and sends nothing — which is also the default, so a mis-wired caller
         // cannot upload by accident"); die Kette prueft den Trockenlauf vorher selbst, hier steht die
         // zweite Tuer.
-        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(_tvstClient, dryRun: _config.DryRun);
+        var endpoint = new Api.Endpoints.TvSubtitlesUploadEndpoint(
+            _tvstClient,
+            dryRun: _config.DryRun,
+            // F-M641: der Pack-Schalter der GUI gilt auch fuer diese Quelle. Der Endpunkt liest die
+            // Konfiguration nicht selbst — er bekommt den Schalter wie den Trockenlauf uebergeben
+            // (F-M496) und lehnt einen Pack ab, wenn er aus ist.
+            seasonPacks: _config.UploadSeasonPacks,
+            // F-M642: ein erfolgreicher Pack schreibt seine Zeile in den Store.
+            registry: Registry);
         var ticket = new Api.Endpoints.UploadTicket(
             series.Name,
             imdbId,

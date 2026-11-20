@@ -16,6 +16,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.SubScribe.Configuration;
+using Jellyfin.Plugin.SubScribe.Data;
+using Jellyfin.Plugin.SubScribe.Registry;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.SubScribe.Api.Endpoints;
@@ -173,6 +175,8 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
     private readonly TvSubtitlesClient _client;
     private readonly bool _dryRun;
     private readonly ILogger? _logger;
+    private readonly bool _seasonPacks;
+    private readonly ContentHashRegistry? _registry;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TvSubtitlesUploadEndpoint"/> class.
@@ -181,11 +185,27 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
     /// <param name="dryRun">True (default) builds the request and sends nothing. The plugin's own
     /// DryRun switch is passed in here — it is not read inside, so the endpoint stays testable.</param>
     /// <param name="logger">Optional logger — it only ever says why an id could not be read back.</param>
-    public TvSubtitlesUploadEndpoint(TvSubtitlesClient client, bool dryRun = true, ILogger? logger = null)
+    /// <param name="seasonPacks">
+    /// F-M641: der vorhandene Pack-Schalter der GUI (<see cref="PluginConfiguration.UploadSeasonPacks"/>),
+    /// hereingereicht wie der Trockenlauf — der Endpunkt liest die Konfiguration nicht selbst. Steht er
+    /// aus, wird ein Pack abgelehnt, statt an einer Einstellung vorbei zu senden.
+    /// </param>
+    /// <param name="registry">
+    /// F-M642: der Store, in den ein erfolgreicher Pack seine Zeile schreibt. Optional, weil ein
+    /// Trockenlauf und jede Suite ohne Store laufen muessen; ohne ihn wird nichts gebucht.
+    /// </param>
+    public TvSubtitlesUploadEndpoint(
+        TvSubtitlesClient client,
+        bool dryRun = true,
+        ILogger? logger = null,
+        bool seasonPacks = false,
+        ContentHashRegistry? registry = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _dryRun = dryRun;
         _logger = logger;
+        _seasonPacks = seasonPacks;
+        _registry = registry;
     }
 
     /// <inheritdoc />
@@ -202,8 +222,24 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
 
         if (ticket.SeasonPack)
         {
-            return new EndpointAnswer(
-                Provider, false, "this source has no season packs — one episode per upload", 0, null, _dryRun);
+            // F-M641 (Betreiber-Vorgabe 20.11.2026): ein Staffel-Pack geht als EIN Zip in den
+            // Staffel-Slot der Seite (episode=0) — nicht als Folge ohne Nummer. Zwei Dinge muessen
+            // vorher stimmen, sonst wird nichts gesendet:
+            //   1. der vorhandene Pack-Schalter der GUI ist an (kein eigener Schalter fuer tvst),
+            //   2. die Datei ist ein Zip (sonst legte die Seite eine .srt in den Staffel-Slot).
+            if (!_seasonPacks)
+            {
+                return new EndpointAnswer(
+                    Provider, false, "season packs are switched off in the settings (UploadSeasonPacks)",
+                    0, null, _dryRun);
+            }
+
+            if (!ticket.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                return new EndpointAnswer(
+                    Provider, false, "a season pack is one .zip — the season slot takes the container, not a single .srt",
+                    0, null, _dryRun);
+            }
         }
 
         var language = TvSubtitlesDownloadEndpoint.SiteLanguage(ticket.Language);
@@ -242,28 +278,50 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
             var tmdb = long.TryParse(ticket.TmdbId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var t)
                 ? t
                 : (long?)null;
-            upload = TvSubtitlesClient.BuildUpload(
-                showId.Value,
-                ticket.Season,
-                ticket.Episode,
-                language,
-                ticket.FileName,
-                ticket.Data,
-                ticket.Rip,
-                ticket.Release,
-                tmdb,
-                ticket.ImdbId,
-                // F-M572 (Operator-Anweisung 17.11.2026: „Dann trag es zukünftig in die comments ein"):
-                // der Folgentitel steht im Kommentar. Die Seite baut den DATEINAMEN aus ihrem eigenen
-                // Folgeneintrag — an „Mo" S01E05 zu sehen: Jellyfin führt „Tombstone", die Seite zeigt
-                // „Episode 5", und der Name ist kein Feld, das wir senden. Der Kommentar ist der Ort, an
-                // dem der richtige Titel mitkommt.
-                commentExtra: null,
-                doubleEpisode: ticket.DoubleEpisode,
-                hearingImpaired: ticket.HearingImpaired,
-                showTitle: ticket.ShowName,
-                episodeTitle: ticket.EpisodeTitle,
-                year: ticket.MovieYear);
+            if (ticket.SeasonPack)
+            {
+                // F-M641: Staffel-Slot (episode=0), Zip, Pack-Name im release-Feld, Staffelzeile im
+                // Kommentar. `hi` geht nur mit, wenn der GANZE Pack HI ist — der Aufrufer bildet je
+                // (Sprache, Variante) ein eigenes Paket, deshalb beschreibt das Ticket den Pack.
+                upload = TvSubtitlesClient.BuildSeasonPack(
+                    showId.Value,
+                    ticket.Season,
+                    language!,
+                    ticket.FileName,
+                    ticket.Data,
+                    ticket.Rip,
+                    ticket.Release,
+                    tmdb,
+                    ticket.ImdbId,
+                    hearingImpaired: ticket.HearingImpaired,
+                    showTitle: ticket.ShowName,
+                    year: ticket.MovieYear);
+            }
+            else
+            {
+                upload = TvSubtitlesClient.BuildUpload(
+                    showId.Value,
+                    ticket.Season,
+                    ticket.Episode,
+                    language,
+                    ticket.FileName,
+                    ticket.Data,
+                    ticket.Rip,
+                    ticket.Release,
+                    tmdb,
+                    ticket.ImdbId,
+                    // F-M572 (Operator-Anweisung 17.11.2026: „Dann trag es zukünftig in die comments ein"):
+                    // der Folgentitel steht im Kommentar. Die Seite baut den DATEINAMEN aus ihrem eigenen
+                    // Folgeneintrag — an „Mo" S01E05 zu sehen: Jellyfin führt „Tombstone", die Seite zeigt
+                    // „Episode 5", und der Name ist kein Feld, das wir senden. Der Kommentar ist der Ort, an
+                    // dem der richtige Titel mitkommt.
+                    commentExtra: null,
+                    doubleEpisode: ticket.DoubleEpisode,
+                    hearingImpaired: ticket.HearingImpaired,
+                    showTitle: ticket.ShowName,
+                    episodeTitle: ticket.EpisodeTitle,
+                    year: ticket.MovieYear);
+            }
         }
         catch (ArgumentException ex)
         {
@@ -282,6 +340,30 @@ public sealed class TvSubtitlesUploadEndpoint : IUploadEndpoint
         // („fuer tvst hochgeladen"), und `MarkOf` schreibt ohne sie die eigene Marke
         // `own:tvsubtitles:<Zeit>:<hex>`. Adressiert wird die Seite nie mit dieser Nummer.
         string? id = null;
+
+        // F-M642: ein erfolgreicher Pack schreibt seine Zeile — in SEINER Quelle, nicht in der von
+        // SubDL. Der Schluessel nennt die Quelle, deshalb kann der tvst-Pack den SubDL-Pack derselben
+        // Staffel nicht ueberschreiben. Gebucht wird nur, was wirklich hinausging: im Trockenlauf und
+        // ohne Store bleibt die Zeile aus. Die Folgen kommen aus dem Zip, das gerade gesendet wurde —
+        // was die Dateinamen nicht nennen, wird nicht geraten (F-M466: eine Zeile ohne Beleg ist
+        // schlimmer als keine).
+        if (ticket.SeasonPack && ok && _registry is not null && !string.IsNullOrWhiteSpace(ticket.ImdbId))
+        {
+            var episodes = TvSubtitlesClient.EpisodesInZip(ticket.Data);
+            var imdb = ticket.ImdbId!;
+            _registry.MarkAndFlush(() => _registry.RecordPack(
+                imdb,
+                ticket.Season,
+                ticket.Language,
+                ticket.HearingImpaired,
+                ticket.Release,
+                // F-M612: die Seite gibt auf den Upload keine Kennung zurueck.
+                packId: null,
+                episodes,
+                absorbedIds: null,
+                fingerprint: null,
+                source: PackEntity.TvSubtitlesSource));
+        }
 
         return new EndpointAnswer(
             Provider,

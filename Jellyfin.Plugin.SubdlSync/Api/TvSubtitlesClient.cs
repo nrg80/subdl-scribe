@@ -1127,22 +1127,14 @@ public sealed class TvSubtitlesClient
     }
 
     /// <summary>
-    /// F-M481 (operator order 15.11.2026): the tag this client writes into the comment — the plugin name
-    /// and the version that is actually running, read from the assembly so a build cannot carry a stale
-    /// number. The uploader uses it to tell which client put a subtitle there.
-    /// </summary>
-    public static string ClientTag { get; } =
-        "Sub Scribe " + (typeof(TvSubtitlesClient).Assembly.GetName().Version?.ToString() ?? "0.0.0.0");
-
-    /// <summary>
-    /// F-M481: the comment field of an upload — the TMDb and IMDb ids plus this client's tag, because the
-    /// site has no field for either and the operator wants both carried (order 15.11.2026: "Comment soll
-    /// auch den Client neben den ids enthalten"). The author field stays empty.
+    /// F-M481/F-M574: der Kommentar eines Uploads. Kennungen und Zusatz, sonst nichts — der frueher
+    /// hier gebaute Client-Tag (Produktname plus laufende Version) ist am 20.11.2026 entfallen: er
+    /// wurde von keiner Stelle gesendet, und F-M641 verbietet Version und Client-Namen im Kommentar.
     /// </summary>
     /// <param name="tmdbId">The TMDb id, when known.</param>
     /// <param name="imdbId">The IMDb id, when known.</param>
-    /// <param name="extra">Optional text, placed between the ids and the client tag.</param>
-    /// <returns>The comment line, e.g. <c>TMDB 1422 / IMDb tt1442464 / Sub Scribe 12.1.12.380</c>.</returns>
+    /// <param name="extra">Optional text, placed after the ids.</param>
+    /// <returns>The comment line, e.g. <c>TMDb: 1422 / IMDb: tt1442464</c>.</returns>
     public static string Comment(long? tmdbId, string? imdbId, string? extra = null)
     {
         // F-M574: es gibt EINEN Kommentar-Bauer (Api.Endpoints.UploadComment). Diese Fassung bleibt fuer
@@ -1193,6 +1185,144 @@ public sealed class TvSubtitlesClient
         string? episodeTitle = null,
         int year = 0)
     {
+        var problems = Problems(showId, season, episode, language, fileName, data, rip, tmdbId, imdbId);
+        if (problems.Count > 0)
+        {
+            // F-M498: der Text prueft den ganzen Payload, nicht showId — der Parametername stand
+            // falsch und haengte sich an jede Meldung an ("rip must be one of … (Parameter 'showId')").
+            throw new ArgumentException(string.Join("; ", problems), "upload");
+        }
+
+        // F-M574: drei Zeilen — Kennungen, Folge mit Serien- und Folgentitel, Jahr.
+        var comment = Api.Endpoints.UploadComment.Series(
+            imdbId, tmdbId?.ToString(CultureInfo.InvariantCulture), season, episode,
+            showTitle, episodeTitle, year);
+        return Payload(
+            showId, season, episode, SiteLanguage(language)!, rip, release, comment,
+            doubleEpisode, hearingImpaired, fileName, data);
+    }
+
+    /// <summary>
+    /// F-M641 (Betreiber-Vorgabe 20.11.2026): der Upload eines STAFFEL-PACKS an dieselbe Adresse
+    /// (<c>/add1.php</c>). Der Staffel-Slot der Seite ist <c>episode=0</c> — ihre Pack-Seite heisst
+    /// <c>episode-&lt;show&gt;-&lt;staffel&gt;.html</c>, also ist 0 die Staffel und keine Folge. Gesendet
+    /// wird EIN Zip mit den Folgen-SRTs; <c>release</c> traegt den Pack-Namen, der Kommentar die
+    /// Staffelzeile (<see cref="Api.Endpoints.UploadComment.Season"/>). Version und Client-Name stehen
+    /// nirgends im Kommentar.
+    /// <para>
+    /// Ein Pack ist immer genau eine Sprache und eine Variante: <paramref name="hearingImpaired"/> gilt
+    /// fuer den GANZEN Container. <c>hi</c> geht deshalb nur mit, wenn der Pack ausschliesslich HI ist —
+    /// HI und Nicht-HI werden nie gemischt, der Aufrufer bildet je (Sprache, Variante) ein eigenes Paket.
+    /// </para>
+    /// </summary>
+    /// <param name="showId">The show id from <see cref="ShowsAsync"/> — 0 is not accepted.</param>
+    /// <param name="season">1–22.</param>
+    /// <param name="language">A code from <see cref="Languages"/> (ISO codes are mapped).</param>
+    /// <param name="fileName">File name sent in the part; must end in .zip — a pack is a container.</param>
+    /// <param name="data">The bytes of the zip.</param>
+    /// <param name="rip">A value from <see cref="Rips"/>, empty allowed.</param>
+    /// <param name="release">The pack name — required, it is the page's only name for the container.</param>
+    /// <param name="tmdbId">TMDb id — the comment carries the ids, so at least one id is required.</param>
+    /// <param name="imdbId">IMDb id.</param>
+    /// <param name="hearingImpaired">True only when EVERY member of the pack is SDH.</param>
+    /// <param name="showTitle">Series title for the comment line.</param>
+    /// <param name="year">Year of first broadcast, 0 when unknown.</param>
+    /// <returns>The finished upload payload.</returns>
+    public static TvSubtitlesUpload BuildSeasonPack(
+        int showId,
+        int season,
+        string language,
+        string fileName,
+        byte[] data,
+        string? rip = null,
+        string? release = null,
+        long? tmdbId = null,
+        string? imdbId = null,
+        bool hearingImpaired = false,
+        string? showTitle = null,
+        int year = 0)
+    {
+        var problems = Problems(showId, season, 0, language, fileName, data, rip, tmdbId, imdbId);
+
+        // F-M641: die Seite legt in den Staffel-Slot, was als Datei kommt. Eine einzelne .srt dort
+        // waere eine Folge ohne Folgennummer — deshalb ist ein Nicht-Zip hier eine Absage und keine
+        // stille Fehlablage.
+        var name = string.IsNullOrWhiteSpace(fileName) ? string.Empty : fileName.Trim();
+        if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add("a season pack is one .zip — the season slot takes the container, not a single .srt");
+        }
+
+        if (string.IsNullOrWhiteSpace(release))
+        {
+            problems.Add("a season pack needs the pack name in the release field");
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new ArgumentException(string.Join("; ", problems), "upload");
+        }
+
+        // F-M641: die Staffelzeile statt der Folge — „IMDb: … / TMDb: … — S02: Serie — 2025".
+        var comment = Api.Endpoints.UploadComment.Season(
+            imdbId, tmdbId?.ToString(CultureInfo.InvariantCulture), season, showTitle, year);
+        return Payload(
+            showId, season, 0, SiteLanguage(language)!, rip, release, comment,
+            doubleEpisode: false, hearingImpaired, fileName, data);
+    }
+
+    /// <summary>
+    /// F-M641: die Folgennummern, die in einem Pack-Zip stecken — gelesen aus den Namen der Eintraege
+    /// (<c>…S01E03…</c>), aufsteigend und ohne Dubletten. Die Pack-Zeile im Store schreibt sie mit;
+    /// was der Zip nicht nennt, wird nicht geraten (dann bleibt die Liste leer).
+    /// </summary>
+    /// <param name="zip">The container's bytes.</param>
+    /// <returns>The episode numbers, ascending.</returns>
+    public static IReadOnlyList<int> EpisodesInZip(byte[]? zip)
+    {
+        if (zip is null || zip.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        try
+        {
+            using var archive = new ZipArchive(new MemoryStream(zip), ZipArchiveMode.Read);
+            var numbers = new SortedSet<int>();
+            foreach (var entry in archive.Entries)
+            {
+                var treffer = EpisodeInName.Match(entry.FullName);
+                if (treffer.Success
+                    && int.TryParse(
+                        treffer.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture,
+                        out int episode))
+                {
+                    numbers.Add(episode);
+                }
+            }
+
+            return numbers.ToList();
+        }
+        catch (InvalidDataException)
+        {
+            // Kein lesbarer Zip: die Folgenliste bleibt leer, der Upload laeuft weiter. Die Zahlen
+            // sind eine Zugabe zur Zeile, keine Bedingung fuer den Upload.
+            return Array.Empty<int>();
+        }
+    }
+
+    /// <summary>F-M641: die Folge in einem Dateinamen eines Packs — <c>S01E03</c>, Staffel ungenutzt.</summary>
+    private static readonly Regex EpisodeInName = new(
+        "[sS][0-9]{1,2}[eE]([0-9]{1,4})", RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// F-M480/F-M641: die Pruefungen, die fuer Einzel- und Pack-Upload gleichermassen gelten — eine
+    /// Stelle, damit ein Pack nicht an einer Pruefung vorbeikommt, die die Einzelfolge passieren muss.
+    /// </summary>
+    private static List<string> Problems(
+        int showId, int season, int episode, string language, string fileName, byte[] data,
+        string? rip, long? tmdbId, string? imdbId)
+    {
         var problems = new List<string>();
         if (showId <= 0)
         {
@@ -1212,8 +1342,7 @@ public sealed class TvSubtitlesClient
         // F-M502: die Pruefung laeuft ueber die Bruecke, nicht ueber die Tabelle — ein ISO-Code
         // (gre, cze, chi, jpn, deu …) oder ein Code mit Region (pt-BR) wird auf das Kuerzel der Seite
         // gezogen. Was die Bruecke nicht kennt, ist unbekannt und wird nicht geraten.
-        var siteLanguage = SiteLanguage(language);
-        if (siteLanguage is null)
+        if (SiteLanguage(language) is null)
         {
             problems.Add("language must be one of the site's codes (ISO codes are mapped): " +
                 string.Join(", ", Languages.Keys.OrderBy(k => k, StringComparer.Ordinal)));
@@ -1242,25 +1371,28 @@ public sealed class TvSubtitlesClient
             problems.Add("file name must end in .srt or .zip");
         }
 
-        if (problems.Count > 0)
-        {
-            // F-M498: der Text prueft den ganzen Payload, nicht showId — der Parametername stand
-            // falsch und haengte sich an jede Meldung an ("rip must be one of … (Parameter 'showId')").
-            throw new ArgumentException(string.Join("; ", problems), "upload");
-        }
+        return problems;
+    }
 
+    /// <summary>
+    /// F-M480/F-M641: die Feldliste eines Uploads in der Reihenfolge des Formulars. Einzel und Pack
+    /// teilen sie — der einzige Unterschied ist die Folgennummer (0 beim Pack) und der Kommentar.
+    /// </summary>
+    private static TvSubtitlesUpload Payload(
+        int showId, int season, int episode, string siteLanguage, string? rip, string? release,
+        string comment, bool doubleEpisode, bool hearingImpaired, string? fileName, byte[] data)
+    {
+        var ripValue = rip ?? string.Empty;
+        var name = string.IsNullOrWhiteSpace(fileName) ? "subtitle.srt" : fileName.Trim();
         var fields = new List<KeyValuePair<string, string>>
         {
             new("tvshow", showId.ToString(CultureInfo.InvariantCulture)),
             new("season", season.ToString(CultureInfo.InvariantCulture)),
             new("episode", episode.ToString(CultureInfo.InvariantCulture)),
-            new("lang", siteLanguage!),
+            new("lang", siteLanguage),
             new("rip", ripValue),
             new("release", release?.Trim() ?? string.Empty),
-            // F-M574: drei Zeilen — Kennungen, Folge mit Serien- und Folgentitel, Jahr.
-            new("comment", Api.Endpoints.UploadComment.Series(
-                imdbId, tmdbId?.ToString(CultureInfo.InvariantCulture), season, episode,
-                showTitle, episodeTitle, year)),
+            new("comment", comment),
             new("go", "1"),
         };
 
@@ -1281,8 +1413,8 @@ public sealed class TvSubtitlesClient
         // gesuchte Code kann dagegen ISO sein ("gre"). Beide laufen deshalb durch dieselbe Bruecke —
         // sonst faende die Ruecklesung einen Eintrag nicht, den der Upload gerade angelegt hat.
         return new TvSubtitlesUpload(
-            fields, name, data!,
-            Languages[siteLanguage!].Name, Languages[siteLanguage!].Iso3);
+            fields, name, data,
+            Languages[siteLanguage].Name, Languages[siteLanguage].Iso3);
     }
 
     /// <summary>

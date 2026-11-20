@@ -351,11 +351,16 @@ public class ScribeReset : ControllerBase
 
             int stempelGesamt = 0;
             int urteileGesamt = 0;
+            int packAbsagen = 0;
             foreach (string hash in hashes)
             {
                 var (s, v) = registry.ReopenForRetry(hash, stempel, urteile);
                 stempelGesamt += s;
                 urteileGesamt += v;
+                // F-M644: der Reset gilt der DATEI und der Staffel, in der sie liegt — eine gemerkte
+                // Ablehnung des Staffel-Packs faellt mit. Sonst ginge die Folge erneut hoch und der Pack
+                // bliebe an einer Absage haengen, die der Bediener gerade zurueckgenommen hat.
+                packAbsagen += registry.ReopenPackRefusals(hash);
             }
 
             LogUtil.Normal(
@@ -365,6 +370,15 @@ public class ScribeReset : ControllerBase
                 stempelGesamt,
                 urteileGesamt);
 
+            if (packAbsagen > 0)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] reset path {File} — {Count} refused season pack(s) of this season are open again (F-M644).",
+                    System.IO.Path.GetFileName(path),
+                    packAbsagen);
+            }
+
             ScheduledTasks.ScribeEventDispatcher.Instance?.ReloadQueues();
             return Ok(new
             {
@@ -373,6 +387,7 @@ public class ScribeReset : ControllerBase
                 media = hashes.Count,
                 stamps = stempelGesamt,
                 verdicts = urteileGesamt,
+                packRefusals = packAbsagen,
             });
         }
         catch (Exception ex)

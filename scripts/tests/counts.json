@@ -179,7 +179,7 @@
     },
     "T203": {
       "suite": "tvsubtitles",
-      "checks": 41
+      "checks": 40
     },
     "T205": {
       "suite": "endpoints",
@@ -668,6 +668,22 @@
     "T327": {
       "suite": "endpoints",
       "checks": 1
+    },
+    "T328": {
+      "suite": "tvsubtitles",
+      "checks": 8
+    },
+    "T329": {
+      "suite": "storex",
+      "checks": 6
+    },
+    "T330": {
+      "suite": "seasonpack",
+      "checks": 9
+    },
+    "T331": {
+      "suite": "storex",
+      "checks": 13
     }
   }
 }

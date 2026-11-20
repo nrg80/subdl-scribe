@@ -825,8 +825,30 @@ public class WorkerRunEntity
 /// </summary>
 public class PackEntity
 {
-    /// <summary>Primary key: "&lt;imdb&gt;|S&lt;season&gt;|&lt;lang&gt;|&lt;hi|plain&gt;" — one pack per season and language.</summary>
+    /// <summary>F-M642: die Quelle, die den Pack traegt — SubDL baut seine Container selbst.</summary>
+    public const string SubdlSource = "subdl";
+
+    /// <summary>F-M642: die zweite Quelle, die seit F-M641 Staffel-Packs kennt.</summary>
+    public const string TvSubtitlesSource = "tvsubtitles";
+
+    /// <summary>
+    /// Primary key: "&lt;imdb&gt;|S&lt;season&gt;|&lt;lang&gt;|&lt;hi|plain&gt;|&lt;source&gt;" — one pack
+    /// per season, language, variant and SOURCE.
+    /// <para>
+    /// F-M642: die Quelle steht seit dem 20.11.2026 im Schluessel. Vorher war der Pack je (Staffel,
+    /// Sprache, Variante) genau einer, weil nur SubDL Container baute; zwei Quellen teilten sich also
+    /// eine Zeile, und der zweite Pack haette den ersten ueberschrieben — die Zeile haette danach eine
+    /// Staffel als „gepackt" gefuehrt, die es bei dieser Quelle nie gab.
+    /// </para>
+    /// </summary>
     public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// F-M642: die Quelle, zu der die Zeile gehoert (<see cref="SubdlSource"/> oder
+    /// <see cref="TvSubtitlesSource"/>). Zeilen aus der Zeit vor der Spalte gelten als
+    /// <see cref="SubdlSource"/> — damals war SubDL die einzige Quelle mit Packs.
+    /// </summary>
+    public string Source { get; set; } = SubdlSource;
 
     /// <summary>Series IMDb id the pack was built for.</summary>
     public string ImdbId { get; set; } = string.Empty;
@@ -847,8 +869,13 @@ public class PackEntity
     public string? ReleaseName { get; set; }
 
     /// <summary>
-    /// SubDL's own id for the pack when the upload answered with one, else the pack NAME — which is
-    /// unique per season and content and is what the postprocessing pass can match against.
+    /// The packed id of THIS row's own source when the upload answered with one, else the pack NAME —
+    /// which is unique per season and content and is what the postprocessing pass can match against.
+    /// <para>
+    /// F-M642: seit die Quelle im Schluessel steht, gibt es je Quelle eine eigene Zeile und damit
+    /// genau eine Kennung pro Zeile. SubDLs Pack-Id steht also nie neben einer tvst-Kennung in
+    /// derselben Zeile; wer die Kennung einer Quelle braucht, fragt mit dieser Quelle.
+    /// </para>
     /// </summary>
     public string? PackId { get; set; }
 
@@ -870,6 +897,39 @@ public class PackEntity
     /// member comparison.
     /// </summary>
     public string? Fingerprint { get; set; }
+
+    /// <summary>
+    /// F-M644 (Betreiber-Vorgabe 20.11.2026): der Grund, aus dem die QUELLE diesen Behälter abgelehnt
+    /// hat — null, solange nichts abgelehnt wurde.
+    /// <para>
+    /// SubDL antwortet auf einen Pack, dessen Inhalt es schon hat, mit einer Ablehnung
+    /// („already exist"/„duplicate") und nimmt nichts an. Bis hierher war das eine Zeile im Log und
+    /// sonst nichts: die Zeile im Store blieb leer, der nächste Lauf baute denselben Behälter und bekam
+    /// dieselbe Absage — bei jedem Lauf, für immer. Der Grund steht deshalb in der Zeile, die der Pack
+    /// ohnehin hat, zusammen mit dem Fingerabdruck seines Inhalts (<see cref="Fingerprint"/>).
+    /// </para>
+    /// </summary>
+    public string? RefusalReason { get; set; }
+
+    /// <summary>F-M644: wann abgelehnt wurde (UTC) — die Zeile nennt den Grund mit seinem Datum.</summary>
+    public DateTime? RefusedAt { get; set; }
+
+    /// <summary>
+    /// F-M644: wann dieser Behälter tatsächlich durchgegangen ist (UTC) — der Beleg der Zeile.
+    /// <para>
+    /// Je Zeile und damit je Quelle, genau wie <c>SubdlUploadedAt</c>/<c>TvSubtitlesUploadedAt</c> auf
+    /// der Untertitelzeile: „der Pack ist bei SubDL durch" und „der Pack ist bei tvst durch" sind zwei
+    /// Aussagen, und keine darf die andere vortäuschen. Gesetzt wird sie erst, wenn der Versand
+    /// wirklich angenommen wurde (SubDL: <c>uploadSubtitle</c> mit Kennung; tvst: angenommener Versand);
+    /// solange nur abgelehnt wurde, bleibt sie null.
+    /// </para>
+    /// <para>
+    /// BELEG UND ABLEHNUNG SCHLIESSEN SICH AUS: eine Zeile trägt entweder <see cref="UploadedAt"/> oder
+    /// <see cref="RefusalReason"/>/<see cref="RefusedAt"/>, nie beides. Der Erfolg räumt die Absage weg,
+    /// die Absage den Beleg — sonst stünde „durch" neben „abgelehnt am …" und niemand wüsste, was gilt.
+    /// </para>
+    /// </summary>
+    public DateTime? UploadedAt { get; set; }
 
     /// <summary>When the row was first written (UTC).</summary>
     public DateTime Created { get; set; } = DateTime.UtcNow;

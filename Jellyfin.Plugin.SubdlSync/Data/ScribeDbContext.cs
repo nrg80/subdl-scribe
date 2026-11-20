@@ -319,6 +319,10 @@ public sealed class ScribeDbContext : IDisposable
                 + "Episodes TEXT NOT NULL DEFAULT '', "
                 + "AbsorbedIds TEXT NULL, "
                 + "Fingerprint TEXT NULL, "
+                // F-M644: Grund und Datum einer Ablehnung stehen in der Zeile, die der Pack ohnehin hat.
+                + "RefusalReason TEXT NULL, "
+                + "RefusedAt TEXT NULL, "
+                + "UploadedAt TEXT NULL, "
                 + "Created TEXT NOT NULL DEFAULT '', "
                 + "Updated TEXT NOT NULL DEFAULT '');");
             _db.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_packs_ImdbId ON packs (ImdbId);");
@@ -584,6 +588,44 @@ public sealed class ScribeDbContext : IDisposable
             {
                 _db.Database.ExecuteSqlRaw("ALTER TABLE packs ADD COLUMN Fingerprint TEXT NULL;");
                 LogUtil.Normal(_logger, "[Sub Scribe] data file: column {Column} added to packs.", Name);
+            }
+
+            // F-M642: die Quelle der Zeile. Der Bestand kennt sie nicht — und sein Schluessel nennt
+            // sie auch nicht. Ohne das Nachtragen waeren alle bisherigen Pack-Zeilen unter ihrem alten
+            // Schluessel unerreichbar ("…|S01|EN|plain" statt "…|S01|EN|plain|subdl"), und der Lauf
+            // haette jeden bereits gebauten Pack als „nie gepackt" gelesen. Beides in einem Schritt:
+            // Spalte setzen UND Schluessel fortschreiben.
+            //
+            // Die Fortschreibung laeuft bei JEDEM Oeffnen, nicht nur beim Anlegen der Spalte: sie ist
+            // billig (ein UPDATE, das im Normalfall keine Zeile trifft) und holt auch eine Zeile nach,
+            // die zwischen ALTER und UPDATE abgebrochen wurde. Zeilen mit Quelle bleiben unberuehrt,
+            // der Schritt ist damit beliebig oft wiederholbar.
+            const string SourceColumn = "Source";
+            if (!existing.Contains(SourceColumn))
+            {
+                _db.Database.ExecuteSqlRaw("ALTER TABLE packs ADD COLUMN Source TEXT NULL;");
+                LogUtil.Normal(_logger, "[Sub Scribe] data file: column {Column} added to packs.", SourceColumn);
+            }
+
+            int umgeschrieben = _db.Database.ExecuteSqlRaw(
+                "UPDATE packs SET Source = 'subdl', Id = Id || '|subdl' WHERE Source IS NULL;");
+            if (umgeschrieben > 0)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] data file: {Count} pack row(s) keyed to their source (F-M642).",
+                    umgeschrieben);
+            }
+
+            // F-M644: Grund und Datum einer Ablehnung. Additiv — eine Zeile ohne diese Spalten ist eine
+            // Zeile ohne Ablehnung, es wird also nichts nachgetragen und nichts umgeschrieben.
+            foreach (var spalte in new[] { "RefusalReason", "RefusedAt", "UploadedAt" })
+            {
+                if (!existing.Contains(spalte))
+                {
+                    _db.Database.ExecuteSqlRaw($"ALTER TABLE packs ADD COLUMN {spalte} TEXT NULL;");
+                    LogUtil.Normal(_logger, "[Sub Scribe] data file: column {Column} added to packs.", spalte);
+                }
             }
         }
         catch (Exception ex)
@@ -1075,22 +1117,33 @@ public sealed class ScribeDbContext : IDisposable
     public static string EmbedKey(string mediaHash, int subPos) => mediaHash + "|" + subPos;
 
     /// <summary>
-    /// F-M390: builds the primary key of a season pack — one pack per season, language and variant.
+    /// F-M390/F-M642: builds the primary key of a season pack — one pack per season, language, variant
+    /// and source.
     /// <para>
     /// The variant is part of the key because a plain pack and an SDH pack of the same season are two
-    /// different containers on SubDL, and SubDL carries the HI flag as a single field. Without it the
+    /// different containers, and every source carries the HI flag as a single field. Without it the
     /// second pack would overwrite the first one's row and the plugin would believe it had published
     /// something it never sent.
+    /// </para>
+    /// <para>
+    /// F-M642: die QUELLE ist seit dem 20.11.2026 der fuenfte Teil. Sie fehlte, solange nur SubDL
+    /// Container baute; sobald eine zweite Quelle Packs kennt, waere ein gemeinsamer Schluessel eine
+    /// geteilte Zeile — und ein Pack der einen Quelle wuerde den der anderen ueberschreiben. Die
+    /// Vorgabe <c>subdl</c> haelt jeden Aufrufer, der die Quelle nicht nennt, auf dem alten Verhalten.
     /// </para>
     /// </summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
-    /// <param name="language">SubDL language code.</param>
+    /// <param name="language">Language code of the pack at its source.</param>
     /// <param name="hearingImpaired">HI/SDH variant flag.</param>
+    /// <param name="source">Source that carries the pack — <see cref="PackEntity.SubdlSource"/> by default.</param>
     /// <returns>The composite key.</returns>
-    public static string PackKey(string imdbId, int season, string language, bool hearingImpaired)
+    public static string PackKey(
+        string imdbId, int season, string language, bool hearingImpaired,
+        string source = PackEntity.SubdlSource)
         => imdbId + "|S" + season.ToString(System.Globalization.CultureInfo.InvariantCulture)
-           + "|" + language + "|" + (hearingImpaired ? "hi" : "plain");
+           + "|" + language + "|" + (hearingImpaired ? "hi" : "plain")
+           + "|" + (string.IsNullOrWhiteSpace(source) ? PackEntity.SubdlSource : source);
 
     /// <summary>
     /// Builds the primary key of a rejected download candidate.

@@ -446,7 +446,13 @@ internal static class Program
         // field is allowed and is the majority on the page, hence the `?? string.Empty`. Bound as
         // source text, so a later edit cannot quietly put the file name back.
         {
-            int ticketAt = pipeline.IndexOf("var ticket = new Api.Endpoints.UploadTicket(", StringComparison.Ordinal);
+            // F-M643: seit dem Staffel-Pack der zweiten Quelle gibt es ZWEI tvst-Tickets in der Datei.
+            // Der Anker ist deshalb die Einzel-Upload-Methode — geprueft wird ihr Ticket, nicht das
+            // des Behaelters (der traegt den Pack-Namen, nicht die Gruppe).
+            int einzelAt = pipeline.IndexOf("private async Task<UploadResult> SendToTvSubtitlesAsync(", StringComparison.Ordinal);
+            int ticketAt = einzelAt < 0
+                ? -1
+                : pipeline.IndexOf("var ticket = new Api.Endpoints.UploadTicket(", einzelAt, StringComparison.Ordinal);
             int ticketEnd = ticketAt < 0
                 ? -1
                 : pipeline.IndexOf("TvstShowId: show.ShowId", ticketAt, StringComparison.Ordinal);
@@ -1050,6 +1056,81 @@ internal static class Program
         }
 
         Jellyfin.Plugin.SubScribe.Api.ScribeFieldSchema.OnMismatch = null;
+
+        // ── F-M643: der Staffel-Pack der ZWEITEN Quelle ─────────────────────────────────────────────
+        // Der Sammler ist derselbe, der Versand nicht: tvsubtitles.net nimmt EINEN Zip in den
+        // Staffel-Slot (episode=0), SubDL baut seinen Container aus Einzeldateien. Geprueft wird der
+        // Behälter, den der Koordinator wirklich baut (ueber den echten Zip-Leser der Seite), und die
+        // Verdrahtung im Lauf.
+        Console.WriteLine("9. F-M643: a season pack for the second source");
+        {
+            var tvstCoord = File.ReadAllText(
+                Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
+            var tvstPipe = File.ReadAllText(
+                Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
+
+            Check(tvstCoord.Contains("public Func<TvPackTransfer, CancellationToken, Task<UploadResult>>? TvSubtitlesSender", StringComparison.Ordinal)
+                  && tvstCoord.Contains("public sealed record TvPackTransfer(", StringComparison.Ordinal),
+                "F-M643: the collector hands the container to a sender for the second source — the collection itself is shared");
+
+            // Der echte Behälter: der Koordinator baut ihn in einer privaten Hilfsmethode, die Seite
+            // liest die Folgen aus den Eintragsnamen. Beides wird hier wirklich ausgefuehrt.
+            var zipMacher = typeof(SeasonPackCoordinator).GetMethod(
+                "BuildZip",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+            Check(zipMacher != null, "F-M643: the container is built in one place");
+
+            var mitglieder = new List<(string FileName, string Srt)>
+            {
+                ("tt1.S01E01.aaaa1111.EN.srt", "1\r\n00:00:01,000 --> 00:00:02,000\r\nA\r\n"),
+                ("tt1.S01E02.bbbb2222.EN.srt", "1\r\n00:00:01,000 --> 00:00:02,000\r\nB\r\n"),
+                ("tt1.S01E03.cccc3333.EN.SDH.srt", "1\r\n00:00:01,000 --> 00:00:02,000\r\nC\r\n"),
+            };
+            byte[] zip = (byte[])zipMacher!.Invoke(null, new object[] { mitglieder })!;
+            var folgen = Jellyfin.Plugin.SubScribe.Api.TvSubtitlesClient.EpisodesInZip(zip);
+            Check(zip.Length > 0 && folgen.SequenceEqual(new[] { 1, 2, 3 }),
+                "F-M643: the entries are the episode file names, and the site's own reader finds every episode in them ("
+                + string.Join(",", folgen) + ")");
+
+            using (var gelesen = new System.IO.Compression.ZipArchive(new System.IO.MemoryStream(zip)))
+            {
+                Check(gelesen.Entries.Count == 3
+                      && gelesen.Entries.All(e => e.FullName.EndsWith(".srt", StringComparison.Ordinal))
+                      && gelesen.Entries.Select(e => e.FullName).SequenceEqual(mitglieder.Select(m => m.FileName)),
+                    "F-M643: one entry per episode, named exactly like the single upload's file — nothing else rides along");
+            }
+
+            // Die Folgen-Dateinamen kommen aus derselben Funktion wie beim Einzel-Upload — mit Staffel,
+            // weil die SEITE den Namen liest (SubDL-Mitglieder tragen ausdruecklich keine Staffel).
+            Check(tvstCoord.Contains("SeasonPack.NeutralFileName(", StringComparison.Ordinal)
+                  && tvstCoord.IndexOf("SeasonPack.NeutralFileName(", StringComparison.Ordinal)
+                     < tvstCoord.IndexOf("SeasonPack.MemberFileName(", StringComparison.Ordinal),
+                "F-M643: the tvst entries carry the episode's own file name (season included) — the SubDL member naming stays untouched");
+
+            // Der Versand: Ticket mit SeasonPack=true in den Staffel-Slot, Schalter der GUI, Quelle tvst.
+            int packVersand = tvstPipe.IndexOf("private async Task<UploadResult> SendPackToTvSubtitlesAsync(", StringComparison.Ordinal);
+            int packEnde = packVersand < 0 ? -1 : tvstPipe.IndexOf("private async Task<UploadResult> SendToTvSubtitlesAsync(", packVersand, StringComparison.Ordinal);
+            string sender = packVersand < 0 || packEnde < 0 ? string.Empty : tvstPipe[packVersand..packEnde];
+            Check(sender.Contains("SeasonPack: true", StringComparison.Ordinal)
+                  && sender.Contains("TvstShowId: show.ShowId", StringComparison.Ordinal)
+                  && sender.Contains("seasonPacks: _config.UploadSeasonPacks", StringComparison.Ordinal)
+                  && sender.Contains("registry: Registry", StringComparison.Ordinal),
+                "F-M643: the container goes as a pack ticket into the season slot, with the GUI's pack switch and the store");
+            Check(sender.Contains("uebergabe.Hi", StringComparison.Ordinal)
+                  && sender.Contains("DoubleEpisode: false", StringComparison.Ordinal),
+                "F-M643: hi describes the WHOLE container — the collector builds one container per (language, variant), never a mixture");
+
+            // Nur der volle Lauf packt die Bibliothek (F-M420), und nur wenn die Quelle hochladen darf.
+            int tvstPhase = tvstPipe.IndexOf("if (!IsArrivalRun && SourceAllowed(Configuration.SubtitleProvider.TvSubtitles))", StringComparison.Ordinal);
+            Check(tvstPhase > 0
+                  && tvstPipe.IndexOf("PlanPacksFromStore(completeSeasons, source: PackEntity.TvSubtitlesSource)", tvstPhase, StringComparison.Ordinal) > tvstPhase
+                  && tvstPipe.IndexOf("FillOnlyAsync(packImdb, packSeason, packLang, packHi, runCt, PackEntity.TvSubtitlesSource)", tvstPhase, StringComparison.Ordinal) > tvstPhase,
+                "F-M643: the tvst packs are built in the FULL run only, from the library plan, with the same collector");
+
+            Check(tvstPipe.Contains("packCoordinator.TvSubtitlesSender = SendPackToTvSubtitlesAsync;", StringComparison.Ordinal)
+                  && tvstPipe.Contains("geplantProStaffel[(packImdb, packSeason)]", StringComparison.Ordinal),
+                "F-M643: the run wires the sender, and a tvst pair counts as the season's one line (F-M640)");
+        }
 
         Console.WriteLine(Failures.Count == 0
             ? $"seasonpack: {_checks} checks, all green."

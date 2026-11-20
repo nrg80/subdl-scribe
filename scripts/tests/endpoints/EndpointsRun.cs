@@ -23,8 +23,9 @@
 //   5. The tvsubtitles download endpoint really walks the captured pages: show list → season →
 //      episode page → entries filtered to the wanted language → fetch. The fake handler serves the
 //      fixtures, so a changed page shape shows up as a red check.
-//   6. The tvsubtitles upload endpoint builds the form body and sends NOTHING in a dry run, and
-//      refuses a season pack and an unknown language with a reason.
+//   6. The tvsubtitles upload endpoint builds the form body and sends NOTHING in a dry run, refuses
+//      an unknown language with a reason — and takes a season pack as ONE zip into the site's season
+//      slot (episode=0), but only while the GUI's pack switch is on (F-M641/F-M642).
 //   7. The SubDL upload endpoint refuses what it cannot do (season pack, no id, non-UTF-8 bytes)
 //      instead of half-sending it.
 
@@ -238,9 +239,56 @@ internal static class Program
         Check("a dry run reports a built body, sends nothing, and says it was a dry run",
             dry.Ok && dry.DryRun && dry.Bytes > ticket.Data.Length && dry.Provider == SubtitleProvider.TvSubtitles,
             "bytes=" + dry.Bytes);
-        var pack = await tvUpload.SendAsync(ticket with { SeasonPack = true }).ConfigureAwait(false);
-        Check("a season pack is refused — this source has none", !pack.Ok && pack.Bytes == 0
-            && pack.Reason!.Contains("no season packs", StringComparison.Ordinal));
+        // ---- 6b. der tvst-Staffel-Pack (F-M641/F-M642) -----------------------------------------
+        // Die Seite hat einen Staffel-Slot (episode=0) und nimmt dort EIN Zip. Der Endpunkt liest den
+        // vorhandenen Pack-Schalter der GUI nicht selbst — er bekommt ihn uebergeben wie den
+        // Trockenlauf — und lehnt ab, wenn er aus ist oder die Datei kein Zip ist.
+        byte[] packZip;
+        using (var puffer = new MemoryStream())
+        {
+            using (var archiv = new ZipArchive(puffer, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var folge in new[] { 1, 2 })
+                {
+                    var eintrag = archiv.CreateEntry("The Middle S02E0" + folge + ".de.srt");
+                    using var strom = await eintrag.OpenAsync().ConfigureAwait(false);
+                    var bytes = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nhallo\n");
+                    await strom.WriteAsync(bytes).ConfigureAwait(false);
+                }
+            }
+
+            packZip = puffer.ToArray();
+        }
+
+        var packTicket = ticket with
+        {
+            SeasonPack = true,
+            FileName = "The.Middle.S02.GERMAN.1080p.WEB-FEVER.zip",
+            Data = packZip,
+            Release = "The.Middle.S02.GERMAN.1080p.WEB-FEVER",
+        };
+        var ohneSchalter = new TvSubtitlesUploadEndpoint(tvClient, dryRun: true, seasonPacks: false);
+        var packAus = await ohneSchalter.SendAsync(packTicket).ConfigureAwait(false);
+        Check("a pack is refused while the GUI's UploadSeasonPacks switch is off (F-M641)",
+            !packAus.Ok && packAus.Bytes == 0
+            && packAus.Reason!.Contains("UploadSeasonPacks", StringComparison.Ordinal),
+            packAus.Reason);
+
+        var mitSchalter = new TvSubtitlesUploadEndpoint(tvClient, dryRun: true, seasonPacks: true);
+        var packTrocken = await mitSchalter.SendAsync(packTicket).ConfigureAwait(false);
+        Check("with the switch on a pack is built (zip body) and sends nothing in a dry run (F-M641)",
+            packTrocken.Ok && packTrocken.DryRun && packTrocken.Bytes > packZip.Length,
+            "ok=" + packTrocken.Ok + " bytes=" + packTrocken.Bytes + " reason=" + (packTrocken.Reason ?? "-"));
+        var keinZip = await mitSchalter
+            .SendAsync(packTicket with { FileName = "folge.srt", Data = ticket.Data }).ConfigureAwait(false);
+        Check("a pack that is not a .zip is refused before any request (F-M641)",
+            !keinZip.Ok && keinZip.Reason!.Contains(".zip", StringComparison.Ordinal), keinZip.Reason);
+        var packOhneNamen = await mitSchalter
+            .SendAsync(packTicket with { Release = null }).ConfigureAwait(false);
+        Check("a pack without its name in release is refused — the page would have no name for it (F-M641)",
+            !packOhneNamen.Ok && packOhneNamen.Reason!.Contains("pack name", StringComparison.Ordinal),
+            packOhneNamen.Reason);
+
         var sprache = await tvUpload.SendAsync(ticket with { Language = "xx" }).ConfigureAwait(false);
         Check("an unknown language is refused before any request", !sprache.Ok && sprache.Reason!.Contains("xx", StringComparison.Ordinal));
         var ohneShow = await tvUpload.SendAsync(ticket with { ShowName = null }).ConfigureAwait(false);
@@ -584,7 +632,8 @@ internal static class Program
             && uploadSource.Contains("\"[\" + Api.Endpoints.Provenance.Name(quelle) + \"] DRY-RUN would upload {Name} [{Lang}]\"", StringComparison.Ordinal)
             && uploadSource.Contains("foreach (var quelle in UploadSourceOrder(isSeries))", StringComparison.Ordinal)
             && uploadSource.Contains("if (!SourceAllowed(quelle))", StringComparison.Ordinal)
-            && uploadSource.Contains("TvSubtitlesUploadEndpoint(_tvstClient, dryRun: _config.DryRun)", StringComparison.Ordinal),
+            && uploadSource.Contains("new Api.Endpoints.TvSubtitlesUploadEndpoint(", StringComparison.Ordinal)
+            && uploadSource.Contains("seasonPacks: _config.UploadSeasonPacks", StringComparison.Ordinal),
             "tvst line @" + dryLineTvst + ", dry block @" + dryBlockStart + ", call @" + secondSourceCall);
 
         // ---- 17. TMDb ist die einzige Pflicht, SubDL faellt ohne Konfiguration aus der Kette (F-M497) --

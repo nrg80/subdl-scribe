@@ -1922,7 +1922,9 @@ def main():
     # Qualitaetspruefungen, Auto-Abgleich, Bibliotheks-Refresh) und bleibt ohne Merker.
     # F-M533: ReportBrokenSubtitles ist NICHT mehr SubDL-only — derselbe Schalter meldet jetzt auch
     # an tvsubtitles.net (eigene Meldeform "Report bad"), deshalb traegt er keinen Merker mehr.
-    subdl_only = ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
+    # F-M641: "Upload season packs" ist ebenfalls NICHT mehr SubDL-only — seit dem 20.11.2026 baut
+    # auch tvsubtitles.net Packs, der Schalter gibt beide Quellen frei.
+    subdl_only = ("UploadContinueAfterLimit", "DownloadContinueAfterLimit",
                   "DownloadHearingImpaired", "AllowAiTranslatedSubs",
                   "DownloadArchiveCacheDays", "DownloadArchiveCacheMaxMb")
     for cid in subdl_only:
@@ -1942,7 +1944,7 @@ def main():
     check("F-M527: no badge sits between the label text and Jellyfin's checkbox outline",
           '</span> <span class="src-badge' not in page_src,
           "%d kaputte Ketten" % page_src.count('</span> <span class="src-badge'))
-    for cid in ("UploadContinueAfterLimit", "UploadSeasonPacks", "DownloadContinueAfterLimit",
+    for cid in ("UploadContinueAfterLimit", "DownloadContinueAfterLimit",
                 "DownloadHearingImpaired", "AllowAiTranslatedSubs"):
         pos = page_src.find('id="%s"' % cid)
         check("F-M527: %s keeps the marker nested inside its label text" % cid,
@@ -1955,10 +1957,17 @@ def main():
     check("F-M526: no marker claims a tvst-only setting that does not exist",
           page_src.count("src-tvst") == 1)  # nur die CSS-Klasse, kein gesetztes Abzeichen
 
+    # F-M641: der Pack-Schalter wirkt auf BEIDE Quellen (SubDL und tvst bauen Packs) und darf
+    # deshalb keinen Quellenmerker tragen.
+    check("F-M641: the pack switch carries no source marker — both sources build packs",
+          'id="UploadSeasonPacks"' in page_src
+          and 'src-subdl' not in page_src[max(0, page_src.find('id="UploadSeasonPacks"') - 300):
+                                          page_src.find('id="UploadSeasonPacks"') + 300])
+
     # F-M533: der Melde-Schalter wirkt auf BEIDE Quellen und darf keinen Quellenmerker tragen.
     check("F-M533: the report switch carries no source marker any more",
-          page_src.count('>SubDL only</span>') == 7,
-          "%d Abzeichen (erwartet 7 nach dem Melde-Schalter)" % page_src.count('>SubDL only</span>'))
+          page_src.count('>SubDL only</span>') == 6,
+          "%d Abzeichen (erwartet 6 nach dem Melde- und dem Pack-Schalter)" % page_src.count('>SubDL only</span>'))
     check("F-M533: the report switch is named without a source",
           "<span>Report broken subtitles</span>" in page_src)
 

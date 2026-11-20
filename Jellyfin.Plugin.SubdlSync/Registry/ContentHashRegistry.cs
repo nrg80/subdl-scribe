@@ -1420,6 +1420,63 @@ public sealed class ContentHashRegistry : IDisposable
                 continue;
             }
 
+            // F-M644: eine abgelehnte Zeile ist kein Pack — sonst haette die Absage die Staffel fuer
+            // immer als „gepackt" gefuehrt, und ein geaenderter Inhalt waere nie wieder versucht worden.
+            if (!string.IsNullOrWhiteSpace(row.RefusalReason))
+            {
+                continue;
+            }
+
+            var schluessel = (row.ImdbId!, row.Season);
+            if (!karte.TryGetValue(schluessel, out var paare))
+            {
+                paare = new HashSet<(string, bool)>();
+                karte[schluessel] = paare;
+            }
+
+            paare.Add((
+                Language.LanguageMapper.Canonical(row.Language) ?? (row.Language ?? string.Empty).ToUpperInvariant(),
+                row.HearingImpaired ?? false));
+        }
+
+        return karte;
+    }
+
+    /// <summary>
+    /// F-M643 (Betreiber-Vorgabe 20.11.2026): dieselbe Karte, aber fuer EINE Quelle. Seit tvsubtitles.net
+    /// ebenfalls Packs baut, beantwortet die ungefilterte Karte die Frage falsch: sie nennt auch Paare,
+    /// die nur bei der ANDEREN Quelle gepackt sind — der tvst-Plan haette dann eine Staffel fuer erledigt
+    /// gehalten, fuer die tvst nie einen Behälter gesehen hat.
+    /// </summary>
+    /// <param name="source">Die Quelle, deren Packs gemeint sind (<see cref="PackEntity.SubdlSource"/> oder <see cref="PackEntity.TvSubtitlesSource"/>).</param>
+    /// <returns>Gepackte (Sprache, HI)-Paare je (Serie, Staffel), nur diese Quelle.</returns>
+    public Dictionary<(string ImdbId, int Season), HashSet<(string Language, bool HearingImpaired)>> PacksBySeason(string source)
+    {
+        var karte = new Dictionary<(string, int), HashSet<(string, bool)>>();
+        string gesucht = string.IsNullOrWhiteSpace(source) ? PackEntity.SubdlSource : source;
+        foreach (var row in _db.Packs.FindAll())
+        {
+            if (string.IsNullOrWhiteSpace(row.ImdbId) || row.Season < 1)
+            {
+                continue;
+            }
+
+            // F-M644: eine abgelehnte Zeile ist kein Pack — sonst haette die Absage die Staffel fuer
+            // immer als „gepackt" gefuehrt, und ein geaenderter Inhalt waere nie wieder versucht worden.
+            if (!string.IsNullOrWhiteSpace(row.RefusalReason))
+            {
+                continue;
+            }
+
+            // F-M642: eine Zeile ohne Quelle ist Bestand und damit SubDL.
+            if (!string.Equals(
+                    string.IsNullOrWhiteSpace(row.Source) ? PackEntity.SubdlSource : row.Source,
+                    gesucht,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             var schluessel = (row.ImdbId!, row.Season);
             if (!karte.TryGetValue(schluessel, out var paare))
             {
@@ -1875,6 +1932,11 @@ public sealed class ContentHashRegistry : IDisposable
     /// <param name="episodes">Episode numbers the pack carries.</param>
     /// <param name="absorbedIds">SubDL ids of single uploads folded into this pack, when known.</param>
     /// <param name="fingerprint">F-M466: hash over the pack's member contents — the memo's key.</param>
+    /// <param name="source">
+    /// F-M642: die Quelle, die den Container traegt (<see cref="PackEntity.SubdlSource"/> per Vorgabe).
+    /// Sie steht im Schluessel: SubDL und tvst fuehren je ihre eigene Zeile fuer dieselbe Staffel, und
+    /// ein Pack der einen Quelle ueberschreibt den der anderen nicht.
+    /// </param>
     public void RecordPack(
         string imdbId,
         int season,
@@ -1884,18 +1946,21 @@ public sealed class ContentHashRegistry : IDisposable
         string? packId,
         IEnumerable<int> episodes,
         IEnumerable<string>? absorbedIds = null,
-        string? fingerprint = null)
+        string? fingerprint = null,
+        string source = PackEntity.SubdlSource)
     {
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
         {
             return;
         }
 
-        string id = ScribeDbContext.PackKey(imdbId, season, language, hearingImpaired);
+        source = string.IsNullOrWhiteSpace(source) ? PackEntity.SubdlSource : source;
+        string id = ScribeDbContext.PackKey(imdbId, season, language, hearingImpaired, source);
         var existing = _db.Packs.FindById(id);
         _db.Packs.Upsert(new PackEntity
         {
             Id = id,
+            Source = source,
             ImdbId = imdbId,
             Season = season,
             Language = language,
@@ -1906,9 +1971,126 @@ public sealed class ContentHashRegistry : IDisposable
             AbsorbedIds = absorbedIds == null ? existing?.AbsorbedIds : string.Join(",", absorbedIds),
             // F-M466: the fingerprint is the memo — same members in the same shape mean the same pack.
             Fingerprint = string.IsNullOrWhiteSpace(fingerprint) ? existing?.Fingerprint : fingerprint,
+            // F-M644: was oben ist, ist nicht mehr abgelehnt. Der Erfolg raeumt die Absage derselben
+            // Zeile weg und setzt den Beleg — sonst stuende neben einem vorhandenen Pack ein
+            // „abgelehnt am ...", und „Pack ist durch" waere nirgends abzulesen.
+            RefusalReason = null,
+            RefusedAt = null,
+            UploadedAt = DateTime.UtcNow,
             Created = existing?.Created ?? DateTime.UtcNow,
             Updated = DateTime.UtcNow,
         });
+    }
+
+    /// <summary>
+    /// F-M644 (Betreiber-Vorgabe 20.11.2026): merkt, dass die QUELLE diesen Behälter abgelehnt hat —
+    /// mit dem Fingerabdruck seines Inhalts.
+    /// <para>
+    /// WARUM DIE ZEILE UND NICHT EIN EIGENES FELD: der Pack hat seine Zeile, sobald er gebaut ist; die
+    /// Absage betrifft genau diesen Behälter. Sie steht deshalb auf derselben Zeile, und der
+    /// Fingerabdruck ist die Bedingung, unter der sie gilt: derselbe Inhalt wird nicht erneut angeboten,
+    /// ein geänderter (eine Folge dazu, eine andere Sprache, eine andere Variante) hat einen anderen
+    /// Fingerabdruck und wird wieder versucht.
+    /// </para>
+    /// <para>
+    /// Die Felder des vorhandenen Packs (Kennung, Folgen, Release) bleiben stehen: eine Ablehnung
+    /// löscht keinen Beleg. Sie wird nur von <see cref="RecordPack"/> aufgehoben, wenn derselbe
+    /// Behälter später doch durchgeht, und vom Reset einer Einzeldatei
+    /// (<see cref="ReopenPackRefusals"/>), wenn der Bediener die Staffel neu anlaufen lassen will.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Serie.</param>
+    /// <param name="season">Staffel.</param>
+    /// <param name="language">Sprache des Behälters.</param>
+    /// <param name="hearingImpaired">HI-Variante des Behälters.</param>
+    /// <param name="reason">Der Grund, den die Quelle genannt hat.</param>
+    /// <param name="fingerprint">Fingerabdruck der Mitglieder (<see cref="Pipeline.SeasonPack.PackHash"/>).</param>
+    /// <param name="source">F-M642: die Quelle, deren Zeile hier spricht.</param>
+    public void RecordPackRefusal(
+        string imdbId,
+        int season,
+        string language,
+        bool hearingImpaired,
+        string reason,
+        string? fingerprint,
+        string source = PackEntity.SubdlSource)
+    {
+        if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
+        {
+            return;
+        }
+
+        source = string.IsNullOrWhiteSpace(source) ? PackEntity.SubdlSource : source;
+        string id = ScribeDbContext.PackKey(imdbId, season, language, hearingImpaired, source);
+        var existing = _db.Packs.FindById(id);
+        _db.Packs.Upsert(new PackEntity
+        {
+            Id = id,
+            Source = source,
+            ImdbId = imdbId,
+            Season = season,
+            Language = language,
+            HearingImpaired = hearingImpaired,
+            ReleaseName = existing?.ReleaseName,
+            PackId = existing?.PackId,
+            Episodes = existing?.Episodes ?? string.Empty,
+            AbsorbedIds = existing?.AbsorbedIds,
+            Fingerprint = string.IsNullOrWhiteSpace(fingerprint) ? existing?.Fingerprint : fingerprint,
+            RefusalReason = reason,
+            RefusedAt = DateTime.UtcNow,
+            // F-M644: die Absage ist das Gegenteil eines Belegs — ein abgelehnter Behälter ist nie
+            // „durch". Was hier steht, raeumt den Beleg der Zeile weg.
+            UploadedAt = null,
+            Created = existing?.Created ?? DateTime.UtcNow,
+            Updated = DateTime.UtcNow,
+        });
+    }
+
+    /// <summary>
+    /// F-M644: hebt die Ablehnung der Staffel auf, in der diese DATEI liegt — der Weg „diese eine Datei
+    /// noch einmal" aus der GUI (<c>Plugins/SubdlReset/ResetPath</c>, F-M620) muss auch die Absage des
+    /// Behälters mitnehmen.
+    /// <para>
+    /// Ohne das bliebe eine Staffel für immer gesperrt, obwohl der Bediener die Datei ausdrücklich
+    /// wieder geöffnet hat: der Stempel fällt, die Folge geht erneut hoch — und der Pack wird an der
+    /// gemerkten Absage vorbeigeschickt, obwohl sich an seinem Inhalt nichts geändert hat. Genau das
+    /// erwartet niemand, der den Reset drückt.
+    /// </para>
+    /// </summary>
+    /// <param name="mediaHash">Medien-Hash der Datei, die geöffnet wird.</param>
+    /// <returns>Wie viele Zeilen ihre Ablehnung verloren haben.</returns>
+    public int ReopenPackRefusals(string? mediaHash)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return 0;
+        }
+
+        var media = _db.Media.FindById(mediaHash);
+        if (media == null
+            || string.IsNullOrWhiteSpace(media.ImdbId)
+            || media.Season is not > 0)
+        {
+            return 0;
+        }
+
+        // Beide Quellen: der Reset gilt der STAFFEL, nicht einer Quelle. Was danach gebaut wird,
+        // entscheidet die Pack-Phase selbst (F-M644 ueber den Fingerabdruck).
+        int geloescht = 0;
+        foreach (var row in _db.Packs.FindAll()
+                     .Where(x => string.Equals(x.ImdbId, media.ImdbId, StringComparison.Ordinal)
+                                 && x.Season == media.Season
+                                 && !string.IsNullOrWhiteSpace(x.RefusalReason))
+                     .ToList())
+        {
+            row.RefusalReason = null;
+            row.RefusedAt = null;
+            row.Updated = DateTime.UtcNow;
+            _db.Packs.Upsert(row);
+            geloescht++;
+        }
+
+        return geloescht;
     }
 
     /// <summary>
@@ -2002,7 +2184,15 @@ public sealed class ContentHashRegistry : IDisposable
             changed++;
         }
 
-        foreach (var row in _db.Packs.FindAll().Where(x => string.Equals(x.PackId, uploadId, StringComparison.Ordinal)).ToList())
+        foreach (var row in _db.Packs.FindAll()
+                     .Where(x => string.Equals(x.PackId, uploadId, StringComparison.Ordinal)
+                                 // F-M642: die nachzutragende Kennung ist eine SubDL-Upload-Id — nur
+                                 // SubDL-Zeilen koennen sie tragen.
+                                 && string.Equals(
+                                     string.IsNullOrWhiteSpace(x.Source) ? PackEntity.SubdlSource : x.Source,
+                                     PackEntity.SubdlSource,
+                                     StringComparison.Ordinal))
+                     .ToList())
         {
             row.PackId = entryId;
             row.Updated = DateTime.UtcNow;
@@ -2066,6 +2256,17 @@ public sealed class ContentHashRegistry : IDisposable
         int removed = 0;
         foreach (var pack in packs)
         {
+            // F-M642: die getragenen Kennungen sind SubDL-Kennungen von Untertitelzeilen — ein Pack
+            // einer anderen Quelle (tvst) hat dort nie eine Spur und wuerde hier faelschlich als Waise
+            // geloescht. Geraeumt wird nur die eigene Quelle.
+            if (!string.Equals(
+                    string.IsNullOrWhiteSpace(pack.Source) ? PackEntity.SubdlSource : pack.Source,
+                    PackEntity.SubdlSource,
+                    StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             if (string.IsNullOrEmpty(pack.PackId) || carried.Contains(pack.PackId!))
             {
                 continue;
@@ -2090,29 +2291,41 @@ public sealed class ContentHashRegistry : IDisposable
     /// </summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
-    /// <param name="language">SubDL language code.</param>
+    /// <param name="language">Language code of the pack at its source.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="source">F-M642: the source the pack belongs to — SubDL by default.</param>
     /// <returns>The stored row, or null.</returns>
-    public PackEntity? GetPack(string? imdbId, int season, string? language, bool hearingImpaired)
+    public PackEntity? GetPack(
+        string? imdbId, int season, string? language, bool hearingImpaired,
+        string source = PackEntity.SubdlSource)
     {
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1 || string.IsNullOrWhiteSpace(language))
         {
             return null;
         }
 
-        return _db.Packs.FindById(ScribeDbContext.PackKey(imdbId!, season, language!, hearingImpaired));
+        return _db.Packs.FindById(
+            ScribeDbContext.PackKey(imdbId!, season, language!, hearingImpaired, source));
     }
 
     /// <summary>
-    /// F-M390: true when this season, language and variant already went up as a pack of ours.
+    /// F-M390: true when this season, language and variant already went up as a pack of ours — at the
+    /// given source (F-M642).
     /// </summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
-    /// <param name="language">SubDL language code.</param>
+    /// <param name="language">Language code of the pack at its source.</param>
     /// <param name="hearingImpaired">HI/SDH variant.</param>
+    /// <param name="source">F-M642: the source the pack belongs to — SubDL by default.</param>
     /// <returns>True when a pack row exists.</returns>
-    public bool HasPack(string? imdbId, int season, string? language, bool hearingImpaired)
-        => GetPack(imdbId, season, language, hearingImpaired) != null;
+    public bool HasPack(
+        string? imdbId, int season, string? language, bool hearingImpaired,
+        string source = PackEntity.SubdlSource)
+        // F-M644: eine Zeile mit Ablehnung ist KEIN Pack. Sie belegt, dass die Quelle diesen Behälter
+        // abgelehnt hat — nicht, dass er oben ist. Wer „ist die Staffel gepackt?" fragt, bekommt hier
+        // deshalb ein Nein; wer den Grund braucht, nimmt `GetPack` und liest `RefusalReason`.
+        => GetPack(imdbId, season, language, hearingImpaired, source) is { } row
+           && string.IsNullOrWhiteSpace(row.RefusalReason);
 
     /// <summary>
     /// F-M571 (Operator-Anweisung 17.11.2026: „Already up as a pack ist doch etwas das kann man mit dem
@@ -2126,8 +2339,10 @@ public sealed class ContentHashRegistry : IDisposable
     /// </summary>
     /// <param name="imdbId">Series IMDb id.</param>
     /// <param name="season">Season number.</param>
+    /// <param name="source">F-M642: die Quelle, deren Packs gefragt sind — SubDL per Vorgabe.</param>
     /// <returns>Die bereits gepackten (Sprache, HI)-Paare dieser Staffel.</returns>
-    public HashSet<(string Language, bool HearingImpaired)> PacksInSeason(string? imdbId, int season)
+    public HashSet<(string Language, bool HearingImpaired)> PacksInSeason(
+        string? imdbId, int season, string source = PackEntity.SubdlSource)
     {
         var gepackt = new HashSet<(string Language, bool HearingImpaired)>();
         if (string.IsNullOrWhiteSpace(imdbId) || season < 1)
@@ -2136,7 +2351,15 @@ public sealed class ContentHashRegistry : IDisposable
         }
 
         foreach (var row in _db.Packs.FindAll()
-                     .Where(x => string.Equals(x.ImdbId, imdbId, StringComparison.Ordinal) && x.Season == season)
+                     .Where(x => string.Equals(x.ImdbId, imdbId, StringComparison.Ordinal)
+                                 && x.Season == season
+                                 // F-M642: eine Zeile ohne Quelle ist Bestand und damit SubDL.
+                                 && string.Equals(
+                                     string.IsNullOrWhiteSpace(x.Source) ? PackEntity.SubdlSource : x.Source,
+                                     source,
+                                     StringComparison.Ordinal)
+                                 // F-M644: eine Ablehnung ist kein Pack.
+                                 && string.IsNullOrWhiteSpace(x.RefusalReason))
                      .ToList())
         {
             gepackt.Add((

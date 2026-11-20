@@ -27,6 +27,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Globalization;
 using System.Linq;
 using System.Net;
@@ -157,10 +158,6 @@ internal static class Program
         Check("the comment carries ids, episode line and year in three lines",
             kommentar == "IMDb: tt1442464 / TMDb: 1422 — S02E24: The Middle / The Man Hunt — 2009",
             "found: " + kommentar.Replace("\n", " | ", StringComparison.Ordinal));
-        Check("the client tag carries the running version, read from the assembly",
-            TvSubtitlesClient.ClientTag.StartsWith("Sub Scribe ", StringComparison.Ordinal)
-            && TvSubtitlesClient.ClientTag.Length > "Sub Scribe ".Length
-            && TvSubtitlesClient.ClientTag != "Sub Scribe 0.0.0.0");
         Check("one id is enough, an unknown part stays out",
             Jellyfin.Plugin.SubScribe.Api.Endpoints.UploadComment.Series("tt1442464", null, 2, 24, "The Middle", "The Man Hunt", 0)
                 == "IMDb: tt1442464 — S02E24: The Middle / The Man Hunt"
@@ -234,6 +231,59 @@ internal static class Program
             && handler.LastContentType!.StartsWith("multipart/form-data; boundary=", StringComparison.Ordinal));
         Check("the response text is stripped of tags and collapsed",
             real.Response == "ok" && handler.RepliedWith == 200);
+
+        // ---- 4b. der Staffel-Pack (F-M641/F-M642) -----------------------------------------------
+        // Die Seite hat einen Staffel-Slot: episode=0, Datei = EIN Zip, release = Pack-Name, Kommentar
+        // = Staffelzeile. Ein Pack ist eine Sprache und eine Variante — HI und Nicht-HI werden nie
+        // gemischt, deshalb beschreibt das `hi`-Feld den ganzen Container.
+        var packZip = ZipOf(
+            ("The Middle S02E01.de.srt", "1\n00:00:01,000 --> 00:00:02,000\nhallo\n"),
+            ("The Middle S02E02.de.srt", "1\n00:00:01,000 --> 00:00:02,000\nhallo\n"),
+            ("The Middle S02E02.de.srt", "1\n00:00:01,000 --> 00:00:02,000\nhallo\n"));
+        var pack = TvSubtitlesClient.BuildSeasonPack(
+            512, 2, "de", "The.Middle.S02.GERMAN.1080p.WEB-FEVER.zip", packZip, "WEB",
+            "The.Middle.S02.GERMAN.1080p.WEB-FEVER", 1422, "tt1442464", false, "The Middle", 2009);
+        Check("a pack goes into the season slot: episode=0, pack name in release (F-M641)",
+            pack.Fields.Single(f => f.Key == "episode").Value == "0"
+            && pack.Fields.Single(f => f.Key == "season").Value == "2"
+            && pack.Fields.Single(f => f.Key == "release").Value == "The.Middle.S02.GERMAN.1080p.WEB-FEVER"
+            && pack.FileName.EndsWith(".zip", StringComparison.Ordinal),
+            string.Join(",", pack.Fields.Select(f => f.Key + "=" + f.Value)));
+        Check("the pack sends the form's fields in the form's order, no `double` (F-M641)",
+            pack.Fields.Select(f => f.Key)
+                .SequenceEqual(new[] { "tvshow", "season", "episode", "lang", "rip", "release", "comment", "go" }),
+            string.Join(",", pack.Fields.Select(f => f.Key)));
+        Check("the pack's comment names the season, not an episode (F-M641)",
+            pack.Fields.Single(f => f.Key == "comment").Value
+                == "IMDb: tt1442464 / TMDb: 1422 — S02: The Middle — 2009"
+            && !pack.Fields.Single(f => f.Key == "comment").Value.Contains("S02E", StringComparison.Ordinal),
+            pack.Fields.Single(f => f.Key == "comment").Value);
+        Check("the comment carries neither version nor client name (F-M641)",
+            !pack.Fields.Single(f => f.Key == "comment").Value.Contains("Sub Scribe", StringComparison.Ordinal)
+            && !System.Text.RegularExpressions.Regex.IsMatch(
+                pack.Fields.Single(f => f.Key == "comment").Value, "[0-9]+\\.[0-9]+\\.[0-9]+"),
+            pack.Fields.Single(f => f.Key == "comment").Value);
+        Check("hi is sent only for a pack that is HI throughout (F-M641)",
+            !pack.Fields.Any(f => f.Key is "hi" or "double")
+            && TvSubtitlesClient.BuildSeasonPack(
+                    512, 2, "de", "p.zip", packZip, "WEB", "P.S02.GERMAN.HI", 1422, "tt1442464",
+                    hearingImpaired: true, showTitle: "The Middle")
+                .Fields.Single(f => f.Key == "hi").Value == "1");
+        Check("a pack must be one .zip and must carry its name (F-M641)",
+            Refused(() => TvSubtitlesClient.BuildSeasonPack(
+                512, 2, "de", "folge.srt", packZip, "WEB", "Name", 1422, "tt1442464"))
+            && (Refusal(() => TvSubtitlesClient.BuildSeasonPack(
+                    512, 2, "de", "p.zip", packZip, "WEB", null, 1422, "tt1442464")) ?? string.Empty)
+                .Contains("pack name", StringComparison.Ordinal));
+        Check("the pack's episodes come from its member names, ascending and without doubles (F-M641)",
+            TvSubtitlesClient.EpisodesInZip(packZip).SequenceEqual(new[] { 1, 2 })
+            && TvSubtitlesClient.EpisodesInZip(null).Count == 0
+            && TvSubtitlesClient.EpisodesInZip(Encoding.UTF8.GetBytes("kein zip")).Count == 0);
+        var (packBody, _) = TvSubtitlesClient.BuildUploadBody(pack);
+        Check("the pack leaves as the zip it is, bytes unchanged (F-M641)",
+            Encoding.UTF8.GetString(packBody).Contains(
+                "name=\"upfile\"; filename=\"The.Middle.S02.GERMAN.1080p.WEB-FEVER.zip\"", StringComparison.Ordinal)
+            && packBody.AsSpan().IndexOf(packZip) >= 0);
 
         // ---- 5. creating a show: the form, the answer, the number (F-M516) -----------------------
         var addShow = TvSubtitlesClient.BuildAddShow("Beispielserie Test", 2026, 3);
@@ -781,6 +831,29 @@ internal static class Program
         }
 
         return File.ReadAllText(path);
+    }
+
+    /// <summary>
+    /// F-M641: ein Zip mit den genannten Eintraegen — der Pack, den die Seite bekommt. Mehrere
+    /// Eintraege mit demselben Namen sind Absicht: sie belegen, dass die Folgenliste ohne Dubletten
+    /// gelesen wird.
+    /// </summary>
+    /// <param name="entries">Dateiname und Inhalt je Eintrag.</param>
+    /// <returns>Die Zip-Bytes.</returns>
+    private static byte[] ZipOf(params (string Name, string Text)[] entries)
+    {
+        using var puffer = new MemoryStream();
+        using (var archiv = new ZipArchive(puffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, text) in entries)
+            {
+                using var eintrag = archiv.CreateEntry(name).Open();
+                var bytes = Encoding.UTF8.GetBytes(text);
+                eintrag.Write(bytes, 0, bytes.Length);
+            }
+        }
+
+        return puffer.ToArray();
     }
 
     private static TvSubtitlesUpload? BuildOk(byte[] data, bool doubleEpisode = false, bool hearingImpaired = false) =>

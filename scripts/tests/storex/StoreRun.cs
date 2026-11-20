@@ -23,6 +23,7 @@
 
 using Jellyfin.Plugin.SubScribe.Data;
 using Jellyfin.Plugin.SubScribe.Registry;
+using Microsoft.EntityFrameworkCore;
 
 if (args.Length == 0)
 {
@@ -398,6 +399,37 @@ using (var db = new ScribeDbContext(workdir, null))
         db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
     Check(db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 1, "EN", false))?.PackId == "tt26545992.S01.def456.EN",
         "and the newer pack id wins");
+
+    // F-M642: die QUELLE steht im Schluessel. SubDL und tvst fuehren fuer dieselbe Staffel je eine
+    // eigene Zeile mit ihrer eigenen Pack-Kennung — keine Quelle ueberschreibt die andere, und die
+    // Zeile ohne Quellenangabe bleibt der Bestand von SubDL.
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false)
+              != ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource),
+        "the source has its own key",
+        ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource));
+    Check(ScribeDbContext.PackKey("tt26545992", 1, "EN", false).EndsWith("|subdl", StringComparison.Ordinal),
+        "a caller that names no source stays on SubDL",
+        ScribeDbContext.PackKey("tt26545992", 1, "EN", false));
+    db.Packs.Upsert(new PackEntity
+    {
+        Id = ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource),
+        Source = PackEntity.TvSubtitlesSource,
+        ImdbId = "tt26545992",
+        Season = 1,
+        Language = "EN",
+        HearingImpaired = false,
+        ReleaseName = "Lanterns.S01.1080p.WEBRip.10bit",
+        PackId = "Lanterns.S01.1080p.WEBRip.10bit",
+        Episodes = "1,2,3,4,5,6,7,8",
+    });
+    Check(db.Packs.Count() == 2, "both sources hold their own pack row for the same season",
+        db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
+    Check(db.Packs.FindById(
+                  ScribeDbContext.PackKey("tt26545992", 1, "EN", false, PackEntity.TvSubtitlesSource))?.Source
+              == PackEntity.TvSubtitlesSource
+          && db.Packs.FindById(
+                  ScribeDbContext.PackKey("tt26545992", 1, "EN", false))?.PackId == "tt26545992.S01.def456.EN",
+        "each row keeps its own source and its own pack id");
 }
 
 // Reopened: the fact survives a restart, which is the whole point (a pack built in one run must not
@@ -409,6 +441,33 @@ using (var db = new ScribeDbContext(workdir, null))
     db.Packs.DeleteMany(x => x.ImdbId == "tt26545992");
     Check(db.Packs.Count() == 0, "and deleting by series empties it again",
         db.Packs.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
+}
+
+// F-M642: der BESTAND. Eine Zeile aus der Zeit vor der Quelle traegt ihren Schluessel OHNE
+// Quellenteil und in der Spalte nichts — so sieht jede Zeile aus, die eine aeltere Fassung
+// geschrieben hat. Beim naechsten Oeffnen muss sie unter ihrem neuen Schluessel erreichbar sein,
+// sonst liest der Lauf jede bereits gepackte Staffel als „nie gepackt" und baut sie erneut.
+using (var db = new ScribeDbContext(workdir, null))
+{
+    // Eine Datei von vor F-M642 kennt die Spalte gar nicht, und ihr Schluessel nennt keine Quelle.
+    db.Context.Database.ExecuteSqlRaw("ALTER TABLE packs DROP COLUMN Source;");
+    db.Context.Database.ExecuteSqlRaw(
+        "INSERT INTO packs (Id, ImdbId, Season, Language, HearingImpaired, ReleaseName, PackId, Episodes, Created, Updated) "
+        + "VALUES ('tt26545992|S2|DE|plain', 'tt26545992', 2, 'DE', 0, NULL, 'tt26545992.S02.legacy.DE', '1,2', "
+        + "'2026-11-20 00:00:00', '2026-11-20 00:00:00');");
+    Check(db.Context.Database.SqlQueryRaw<int>(
+              "SELECT COUNT(*) AS \"Value\" FROM packs WHERE Id = 'tt26545992|S2|DE|plain'").Single() == 1,
+        "the old-format row is written the way an older release wrote it");
+}
+
+using (var db = new ScribeDbContext(workdir, null))
+{
+    var alteZeile = db.Packs.FindById(ScribeDbContext.PackKey("tt26545992", 2, "DE", false));
+    Check(alteZeile != null && alteZeile.Source == PackEntity.SubdlSource
+          && alteZeile.PackId == "tt26545992.S02.legacy.DE",
+        "a row from before the source column is keyed to SubDL when the file is opened (F-M642)",
+        "source=" + (alteZeile?.Source ?? "(keine Zeile)"));
+    db.Packs.DeleteMany(x => x.ImdbId == "tt26545992");
 }
 
 // ---- F-M542: die TMDb-Antworten liegen im Store ------------------------------------------------
@@ -458,6 +517,119 @@ using (var db = new ScribeDbContext(workdir, null))
     Check(db.Context.TmdbAnswerRows.Count() == 0,
         "F-M542: das Aufraeumen entfernt die abgelaufenen Zeilen",
         db.Context.TmdbAnswerRows.Count().ToString(System.Globalization.CultureInfo.InvariantCulture));
+}
+
+// ---- F-M644: eine abgelehnte Pack-Zeile wird GEMERKT, und ein durchgegangener Beleg ist ihr Gegenteil --
+//
+// Vorher war eine Ablehnung nur eine Zeile im Log: die packs-Zeile blieb leer, der naechste Lauf baute
+// denselben Behaelter und bekam dieselbe Absage — bei jedem Lauf, fuer immer. Geprueft wird die Zeile
+// selbst: Grund, Datum und Fingerabdruck stehen darin, ein Erfolg raeumt die Absage weg und setzt
+// `UploadedAt`, und der Reset einer Einzeldatei oeffnet die Staffel wieder.
+using (var db = new ScribeDbContext(workdir, null))
+{
+    var reg = new ContentHashRegistry(db);
+    string abdruck = Jellyfin.Plugin.SubScribe.Pipeline.SeasonPack.PackHash(new[] { "aaaa", "bbbb", "cccc" });
+
+    reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", abdruck);
+    var abgelehnt = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false));
+    Check(abgelehnt != null
+          && abgelehnt!.RefusalReason == "the source already holds this container (duplicate)"
+          && abgelehnt.RefusedAt != null
+          && abgelehnt.Fingerprint == abdruck,
+        "F-M644: a refusal is written into the pack row with its reason, its date and the fingerprint of its members",
+        abgelehnt?.RefusalReason ?? "(keine Zeile)");
+
+    Check(abgelehnt!.UploadedAt == null,
+        "F-M644: a refused container carries no upload proof — the two statements exclude each other");
+
+    // Die Zeile existiert (mit Grund), gilt aber NICHT als Pack: sonst haette die Absage die Staffel
+    // fuer immer stillgelegt und ein geaenderter Inhalt waere nie wieder geplant worden.
+    Check(!reg.HasPack("tt644", 3, "EN", false)
+          && reg.GetPack("tt644", 3, "EN", false)?.RefusalReason != null,
+        "F-M644: a refused row is readable but is not a pack — the next plan asks the same season again");
+
+    // Dieselbe Staffel, andere Quelle: die Absage gilt NUR ihrer Zeile (F-M642).
+    var tvstZeile = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false, PackEntity.TvSubtitlesSource));
+    Check(tvstZeile == null,
+        "F-M644: the refusal of one source creates no row for the other source");
+
+    // Ein geaenderter Inhalt — eine Folge dazu — ist ein anderer Fingerabdruck. Die neue Absage
+    // ueberschreibt den alten Stand, weil sie denselben Inhalt beschreibt (die Zeile ist der Zustand,
+    // keine Historie).
+    string neuerAbdruck = Jellyfin.Plugin.SubScribe.Pipeline.SeasonPack.PackHash(new[] { "aaaa", "bbbb", "cccc", "dddd" });
+    reg.RecordPackRefusal("tt644", 3, "EN", false, "the source already holds this container (duplicate)", neuerAbdruck);
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false))?.Fingerprint == neuerAbdruck,
+        "F-M644: a changed content gets its own fingerprint — the verdict follows the content, not the season");
+
+    // Der Erfolg: Absage weg, Beleg da.
+    reg.RecordPack("tt644", 3, "EN", false, "Show.S03.1080p", "tt644.S03.x.EN", new[] { 1, 2, 3 }, null, neuerAbdruck);
+    var durch = db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "EN", false));
+    Check(durch != null
+          && string.IsNullOrEmpty(durch!.RefusalReason)
+          && durch.RefusedAt == null,
+        "F-M644: a container that goes through clears its refusal");
+    Check(durch!.UploadedAt != null,
+        "F-M644: and it carries the upload proof (`UploadedAt`) instead");
+
+    // Der Reset einer Einzeldatei (F-M620) gilt der STAFFEL: die Absage faellt mit.
+    reg.EnsureMedia("0123456789abcdef0123456789abcdef", patch: m =>
+    {
+        m.ImdbId = "tt644";
+        m.Season = 3;
+        m.IsSeries = true;
+    });
+    reg.RecordPackRefusal("tt644", 3, "DE", false, "the source already holds this container (duplicate)", abdruck);
+    Check(db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "DE", false))?.RefusalReason != null,
+        "F-M644: a second language of the same season is refused on its own row");
+
+    int geoeffnet = reg.ReopenPackRefusals("0123456789abcdef0123456789abcdef");
+    Check(geoeffnet == 1
+          && db.Packs.FindById(ScribeDbContext.PackKey("tt644", 3, "DE", false))?.RefusalReason == null,
+        "F-M644: the single-file reset of the GUI clears the season's refusal with it",
+        geoeffnet.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    Check(reg.ReopenPackRefusals("ffffffffffffffffffffffffffffffff") == 0,
+        "F-M644: an unknown file opens nothing — no refusal is dropped by accident");
+}
+
+// Die Spalten sind auf einer BESTEHENDEN Datei nachgezogen (F-M644 ist additiv): geprueft wird die
+// Tabelle selbst, nicht der Quelltext.
+using (var db = new ScribeDbContext(workdir, null))
+{
+    var spalten = db.Context.Database
+        .SqlQueryRaw<string>("SELECT name AS \"Value\" FROM pragma_table_info('packs')")
+        .ToList();
+    Check(spalten.Contains("RefusalReason") && spalten.Contains("RefusedAt") && spalten.Contains("UploadedAt"),
+        "F-M644: reason, date and upload proof are columns of the packs table",
+        string.Join(",", spalten));
+    db.Packs.DeleteMany(x => x.ImdbId == "tt644");
+}
+
+// F-M643: die Pack-Karte JE QUELLE — der tvst-Plan darf das SubDL-Paar nicht als „gepackt" lesen.
+using (var db = new ScribeDbContext(workdir, null))
+{
+    db.Packs.Upsert(new PackEntity
+    {
+        Id = ScribeDbContext.PackKey("tt643", 1, "EN", false),
+        Source = PackEntity.SubdlSource,
+        ImdbId = "tt643",
+        Season = 1,
+        Language = "EN",
+        HearingImpaired = false,
+        Episodes = "1,2",
+    });
+    var reg = new ContentHashRegistry(db);
+    var subdl = reg.PacksBySeason(PackEntity.SubdlSource);
+    var tvst = reg.PacksBySeason(PackEntity.TvSubtitlesSource);
+    // Die Karte nennt die Sprache in der Form, die der Store fuehrt (der Mapper entscheidet: "EN" wird
+    // zu "ENG") — verglichen wird deshalb mit derselben Abbildung, nicht mit dem Eingabekuerzel.
+    string erwartet = Jellyfin.Plugin.SubScribe.Language.LanguageMapper.Canonical("EN") ?? "EN";
+    Check(subdl.TryGetValue(("tt643", 1), out var subdlPaare) && subdlPaare.Contains((erwartet, false)),
+        "F-M643: the source-scoped pack map names the SubDL pair",
+        subdl.TryGetValue(("tt643", 1), out var pp) ? string.Join(";", pp) : "none");
+    Check(!tvst.ContainsKey(("tt643", 1)),
+        "F-M643: and the tvst map stays empty — the other source never borrowed that pack");
+    db.Packs.DeleteMany(x => x.ImdbId == "tt643");
 }
 
 Console.WriteLine();

@@ -256,9 +256,13 @@ internal static class Program
         var upload = File.ReadAllText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/UploadPipeline.cs"));
         // F-M571: die Staffel-Pack-Frage kommt jetzt aus dem Lauf-Cache (PacksOf), nicht je Paar aus dem
         // Store — die Aussage bleibt dieselbe: ein schon gepacktes Paar wird nicht erneut geplant.
-        Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal),
+        // F-M643: der Cache wird JE QUELLE befragt — der tvst-Plan darf das SubDL-Paar nicht als
+        // „gepackt" lesen.
+        Check(upload.Contains("? PacksOf(entry.Key.Item1, entry.Key.Item2)", StringComparison.Ordinal)
+              && upload.Contains(": PacksOfSource(entry.Key.Item1, entry.Key.Item2, source)", StringComparison.Ordinal)
+              && upload.Contains("gepacktHier.Contains((", StringComparison.Ordinal),
             "and the fill-only plan skips a season that is already packed");
-        Check(upload.IndexOf("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
+        Check(upload.IndexOf("gepacktHier.Contains((", StringComparison.Ordinal) < upload.IndexOf("already inside a pack, nothing is re-sent", StringComparison.Ordinal),
             "the check comes before the decision it guards");
 
         // ── 8. F-M391: the duplicate goes first, the pack second ────────────────
@@ -323,7 +327,8 @@ internal static class Program
             "the plan no longer treats 'has a SubdlId' as 'is inside a pack'");
         Check(!upload.Contains("inPack.Add(pair)", StringComparison.Ordinal),
             "and the member-id heuristic is gone with it");
-        Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2).Contains((", StringComparison.Ordinal),
+        Check(upload.Contains("PacksOf(entry.Key.Item1, entry.Key.Item2)", StringComparison.Ordinal)
+              && upload.Contains("PacksOfSource(entry.Key.Item1, entry.Key.Item2, source)", StringComparison.Ordinal),
             "the packs row is the only proof that a season is packed");
 
         // ── 15. F-M405: eine Extraktion je Datei, nicht je Sprache ───────────────
@@ -643,6 +648,30 @@ internal static class Program
         Check(dbSource.Contains("ALTER TABLE packs ADD COLUMN Fingerprint TEXT NULL;", StringComparison.Ordinal)
               && dbSource.Contains("EnsurePackColumns();", StringComparison.Ordinal),
             "F-M466: an older data file gets the column on start, guarded by the table's own column list");
+
+        // ── 33. F-M644: eine abgelehnte Pack-Zeile wird gemerkt, nicht wiederholt ───────────────────
+        // Die Zeile im Store (Grund, Datum, Fingerabdruck, UploadedAt) prueft `storex` mit dem echten
+        // Bestand. Hier steht, was der KOORDINATOR damit tut: die Ablehnung der Quelle lesen, sie mit
+        // dem Fingerabdruck vergleichen, und im Zweifel nichts senden.
+        Console.WriteLine("33. A refused pack is remembered, not repeated");
+        Check(packSource.Contains("string.Equals(recorded.Fingerprint, packFingerprint, StringComparison.Ordinal)", StringComparison.Ordinal)
+              && packSource.Contains("recorded.RefusalReason", StringComparison.Ordinal)
+              && packSource.IndexOf("recorded.RefusalReason", StringComparison.Ordinal)
+                 < packSource.IndexOf("F-M466 (memo per season + language with a fingerprint)", StringComparison.Ordinal),
+            "F-M644: the stored refusal is compared with THIS container's fingerprint before the memo answers \"nothing is re-sent\"");
+
+        Check(packSource.Contains("string.Equals(result.Reason, \"duplicate-content\", StringComparison.Ordinal)", StringComparison.Ordinal)
+              && packSource.Contains("_registry.RecordPackRefusal(", StringComparison.Ordinal)
+              && packSource.Contains("Grund, packFingerprint, source", StringComparison.Ordinal),
+            "F-M644: the source's duplicate verdict is written into the row with its reason and the content's fingerprint");
+
+        Check(reg.Contains("GetPack(imdbId, season, language, hearingImpaired, source) is { } row", StringComparison.Ordinal)
+              && reg.Contains("&& string.IsNullOrWhiteSpace(row.RefusalReason);", StringComparison.Ordinal),
+            "F-M644: a refused row is not a pack — \"is this season packed?\" says no");
+
+        Check(reg.Contains("if (!string.IsNullOrWhiteSpace(row.RefusalReason))", StringComparison.Ordinal)
+              && reg.Split("if (!string.IsNullOrWhiteSpace(row.RefusalReason))").Length - 1 >= 2,
+            "F-M644: and the pack maps of both sources leave it out, so a changed content is planned again");
 
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
