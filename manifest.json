@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.8",
-        "changelog": "v12.2.0.8: every tvst season pack reports itself twice — built (episodes, zip name, target) and sent — and a pair without a container says why (F-M646).",
+        "version": "12.2.0.10",
+        "changelog": "v12.2.0.10: a pair that no source is left open for is not collected at all — a refusal now remembers the season signature it is based on, so an unchanged season skips the extraction instead of being unpacked only to be refused again, while a new episode or a changed file collects and tries again (F-M650).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.8-dev/Jellyfin.Plugin.SubdlSync_12.2.0.8.zip",
-        "checksum": "ab99e9567332cafe15b6b61a285d9270",
-        "timestamp": "2026-11-20T07:33:50Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.10-dev/Jellyfin.Plugin.SubdlSync_12.2.0.10.zip",
+        "checksum": "4aa33fe2cf80332346a213745b4337b8",
+        "timestamp": "2026-11-20T08:54:18Z"
       }
     ]
   }
