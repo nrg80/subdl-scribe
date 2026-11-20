@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.2.0.19.
+**Status:** Implementation — v12.2.0.20.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -33,7 +33,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [11. Content Registry and Identity](#11-content-registry-and-identity) — 27 requirements
 - [12. Library Scope and Skip Filters](#12-library-scope-and-skip-filters) — 8 requirements
 - [13. Configuration and Settings Page](#13-configuration-and-settings-page) — 46 requirements
-- [14. Data Model and Persistence](#14-data-model-and-persistence) — 20 requirements
+- [14. Data Model and Persistence](#14-data-model-and-persistence) — 21 requirements
 - [15. Logging, Status and Transparency](#15-logging-status-and-transparency) — 51 requirements
 - [16. Non-Goals](#16-non-goals)
 - [17. Non-Functional Requirements](#17-non-functional-requirements)
@@ -1902,6 +1902,8 @@ There is **no "settled"/"done" state.** "Is this position finished?" is answered
 Route `POST /Plugins/SubdlReset/ResetPath?confirm=true&path=<absoluter Pfad>&what=both|stamps|verdicts`; `confirm` muss exakt `true` sein und der Pfad absolut, sonst antwortet die Route mit `{"ok":false,"error":…}` ohne jeden Schreibzugriff.
 Grund (gemessen 18.11.2026): die Queue entsteht nur aus offenen Stempeln (F-M557/F-M563) — steht ein Stempel, wird die Datei nie wieder angesehen. Elf Folgen (Eyes S01E01–E07, Taylor Swift S01E02/03/05/06) standen als `complete` im Store, während weder SubDL noch tvsubtitles etwas von ihnen hatte und im Log keine einzige Zeile das Urteil erklärte; der einzige vorhandene Ausweg war der Ganz-Store-Reset (F-M90), für elf Dateien unverhältnismäßig.
 `what=stamps` nimmt die drei Zugeh-Stempel (`CompleteSubdl`, `CompleteTvSubtitles`, `CompleteMsub`) samt Spursignatur zurück, `what=verdicts` löscht die Spur-Zeilen mit `Status=rejected`, `both` (Vorgabe) beides. **Unangetastet bleiben** Zeilen mit `Status=uploaded` und die Herkunft eines Funds (`SidecarEntity.Origin`) — beides ist ein Beleg, kein Urteil, und wer einen Beleg löscht, lädt dieselbe Datei ein zweites Mal hoch (F-M489/F-M500). Die Route schreibt eine Zeile je Aufruf (`LogUtil.Normal`, Code F-M620) und ruft `ReloadQueues()`, damit der nächste Scan die Datei erneut einreiht; Rückgabe `{ok, path, media, stamps, verdicts}`. **Bedienerweg ist die GUI**, nicht curl: Expert → Plugin database → „Reset one file" (Pfadfeld, Auswahl `both`/`stamps`/`verdicts`, Knopf) ruft genau diese Route auf und nennt in der Antwort, wie viele Stempel und Urteile gefallen sind. Geprüft in `scripts/tests/endpoints`.
+**F-M660 [D]:** **Der Datei-Reset kann die Urteile der Pack-Phase mitnehmen — und das ist im Dropdown waehlbar.** Der Reset einer Datei (F-M620) raeumt Stempel, abgelehnte Spur-Urteile und die Absage in der `packs`-Zeile (F-M644). Die Urteile der Pack-Phase liegen aber in einem **dritten** Speicher (`PackSeasonStore`, Schluessel = IMDb, Staffel, Sprachmarke, Wert = Signatur der Dateien, F-M611/F-M657). Weil die Signatur aus Folgenzahl, Groesse und Datum der Dateien gebildet wird, passt sie nach einem Datei-Reset unveraendert weiter: die Spur ist frei, die Staffel bleibt gesperrt. Gemessen am 20.11.2026 an MobLand S02 — Spur-Urteile geloescht (`verdicts: 2`), Plan ueberspringt die Staffel trotzdem. Deshalb kennt die Route jetzt den Wert `pack` (einzeln oder mit `+` verbunden, z. B. `verdicts+pack`), der **alle** Staffel-Urteile dieser Serie und Staffel loescht — Plan- und Fuell-Namensraum — und die Zahl im Feld `seasonVerdicts` zurueckmeldet; das Dropdown der Einstellungsseite bietet &bdquo;only the pack verdicts (season memory)&ldquo; und &bdquo;rejected verdicts and pack verdicts&ldquo;. `both` behaelt seine alte Bedeutung (Stempel und Spur-Urteile), damit ein bestehender Aufruf nicht still mehr loescht als vorher. Geprueft in `gui-structure` (beide Optionen im Dropdown, Hinweistext) und `endpoints` (Wert `pack`, Rueckmeldung, `ClearSeason`/`ReopenSeasonVerdicts`).
+
 
 ## 15. Logging, Status and Transparency
 

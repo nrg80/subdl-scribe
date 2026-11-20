@@ -409,6 +409,11 @@
                             track verdicts fall; real uploads and where a find came from stay, so nothing
                             is uploaded a second time. Nothing else in the store is touched, and the next
                             scan queues that file again.
+                            <br /><b>Pack verdicts</b> are a separate memory: when the pack phase gave up on
+                            this season, the reason is stored with the files' signature, and it stays until
+                            the files change — a lifted track lock does not touch it. Pick
+                            &bdquo;only the pack verdicts&ldquo; (or combine it) to let the plan look at the
+                            season again.
                         </div>
                         <div style="display:flex; gap:0.6em; align-items:flex-end; flex-wrap:wrap; margin-top:0.6em;">
                             <div style="flex:1; min-width:24em;">
@@ -419,6 +424,8 @@
                                 <option value="both">stamps and rejected verdicts</option>
                                 <option value="stamps">only the stamps</option>
                                 <option value="verdicts">only the rejected verdicts</option>
+                                <option value="pack">only the pack verdicts (season memory)</option>
+                                <option value="verdicts+pack">rejected verdicts and pack verdicts</option>
                             </select>
                             <button is="emby-button" type="button" class="raised button-submit" id="ResetPathRun">Reset this file…</button>
                         </div>
@@ -1657,7 +1664,7 @@ workers.forEach(function (w) {
                         feld.focus();
                         return;
                     }
-                    if (!confirm('Reset this one file?\n\n' + pfad + '\n\nThe source stamps and the rejected track verdicts fall (' + was + '). Real uploads stay. The next scan looks at the file again.\n\nProceed?')) {
+                    if (!confirm('Reset this one file?\n\n' + pfad + '\n\nCleared: ' + was + '. Real uploads stay. The next scan looks at the file again.\n\nProceed?')) {
                         return;
                     }
                     Dashboard.showLoadingMsg();
@@ -1670,7 +1677,11 @@ workers.forEach(function (w) {
                         Dashboard.hideLoadingMsg();
                         if (res && res.ok) {
                             ziel.textContent = 'Reset: ' + res.media + ' file(s), ' + res.stamps
-                                + ' stamp(s) and ' + res.verdicts + ' rejected verdict(s) cleared — the next scan queues it again.';
+                                + ' stamp(s) and ' + res.verdicts + ' rejected verdict(s) cleared'
+                                + ((res.seasonVerdicts !== undefined && res.seasonVerdicts !== null)
+                                    ? ', ' + res.seasonVerdicts + ' pack verdict(s) of this season cleared'
+                                    : '')
+                                + ' — the next scan queues it again.';
                         } else {
                             ziel.textContent = 'Not reset: ' + ((res && res.error) ? res.error : 'the plugin gave no answer');
                         }

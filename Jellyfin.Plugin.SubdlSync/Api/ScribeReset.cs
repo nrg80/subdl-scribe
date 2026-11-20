@@ -304,7 +304,10 @@ public class ScribeReset : ControllerBase
     /// </summary>
     /// <param name="confirm">Muss genau "true" sein.</param>
     /// <param name="path">Absoluter Pfad der Mediendatei, wie Jellyfin ihn fuehrt.</param>
-    /// <param name="what">both (Vorgabe) | stamps | verdicts.</param>
+    /// <param name="what">
+    /// both (Vorgabe) | stamps | verdicts | pack — einzeln oder mit '+' verbunden, z. B.
+    /// <c>verdicts+pack</c>. `pack` raeumt die Urteile der Pack-Phase fuer diese Staffel (F-M660).
+    /// </param>
     [HttpPost]
     public IActionResult ResetPath(
         [FromQuery] string confirm = "",
@@ -321,8 +324,17 @@ public class ScribeReset : ControllerBase
             return Ok(new { ok = false, error = "path-missing-or-relative" });
         }
 
-        bool stempel = !what.Equals("verdicts", StringComparison.OrdinalIgnoreCase);
-        bool urteile = !what.Equals("stamps", StringComparison.OrdinalIgnoreCase);
+        // F-M660: `what` ist eine Liste, nicht mehr ein Entweder-Oder. Bisher gab es nur die Achse
+        // Stempel <-> Spur-Urteile; die Urteile der Pack-Phase lagen in einem dritten Speicher, den
+        // kein Wert erreichte. Jetzt waehlbar: stamps, verdicts, pack — einzeln oder mit '+' verbunden,
+        // `both` bleibt die alte Bedeutung (Stempel und Spur-Urteile).
+        var teile = (what ?? string.Empty)
+            .Split(new[] { '+', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(t => t.Trim().ToLowerInvariant())
+            .ToHashSet();
+        bool stempel = teile.Count == 0 || teile.Contains("both") || teile.Contains("stamps");
+        bool urteile = teile.Count == 0 || teile.Contains("both") || teile.Contains("verdicts");
+        bool staffel = teile.Contains("pack");
 
         try
         {
@@ -352,6 +364,7 @@ public class ScribeReset : ControllerBase
             int stempelGesamt = 0;
             int urteileGesamt = 0;
             int packAbsagen = 0;
+            int staffelUrteile = 0;
             foreach (string hash in hashes)
             {
                 var (s, v) = registry.ReopenForRetry(hash, stempel, urteile);
@@ -361,6 +374,10 @@ public class ScribeReset : ControllerBase
                 // Ablehnung des Staffel-Packs faellt mit. Sonst ginge die Folge erneut hoch und der Pack
                 // bliebe an einer Absage haengen, die der Bediener gerade zurueckgenommen hat.
                 packAbsagen += registry.ReopenPackRefusals(hash);
+                if (staffel)
+                {
+                    staffelUrteile += registry.ReopenSeasonVerdicts(hash);
+                }
             }
 
             LogUtil.Normal(
@@ -379,6 +396,15 @@ public class ScribeReset : ControllerBase
                     packAbsagen);
             }
 
+            if (staffel)
+            {
+                LogUtil.Normal(
+                    _logger,
+                    "[Sub Scribe] reset path {File} — {Count} season verdict(s) of the pack phase cleared; the plan examines this season again (F-M660).",
+                    System.IO.Path.GetFileName(path),
+                    staffelUrteile);
+            }
+
             ScheduledTasks.ScribeEventDispatcher.Instance?.ReloadQueues();
             return Ok(new
             {
@@ -388,6 +414,7 @@ public class ScribeReset : ControllerBase
                 stamps = stempelGesamt,
                 verdicts = urteileGesamt,
                 packRefusals = packAbsagen,
+                seasonVerdicts = staffelUrteile,
             });
         }
         catch (Exception ex)

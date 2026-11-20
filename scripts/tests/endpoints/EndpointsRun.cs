@@ -1028,6 +1028,17 @@ internal static class Program
             !uploadSource.Contains("ExtractAllStreamsAsync", StringComparison.Ordinal)
             && !uploadSource.Contains("private List<MediaStream> GetTextSubtitleStreams", StringComparison.Ordinal));
 
+        // --- F-M660: der Datei-Reset kann die Staffel-Urteile der Pack-Phase mitnehmen ---------------
+        var reset660 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/ScribeReset.cs"));
+        Check("F-M660: die Route nimmt 'pack' als eigenen Wert und meldet die Zahl zurueck",
+            reset660.Contains("bool staffel = teile.Contains(\"pack\");", StringComparison.Ordinal)
+            && reset660.Contains("ReopenSeasonVerdicts(hash)", StringComparison.Ordinal)
+            && reset660.Contains("seasonVerdicts = staffelUrteile", StringComparison.Ordinal));
+        Check("F-M660: der Staffel-Merker laesst sich je Serie und Staffel raeumen",
+            store657.Contains("public static int ClearSeason(string imdbId, int season)", StringComparison.Ordinal)
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/ContentHashRegistry.cs"))
+                .Contains("public int ReopenSeasonVerdicts(string? mediaHash)", StringComparison.Ordinal));
+
         Check("F-M657: Plan UND Sammler fragen beide Namensraeume",
             uploadSource.Contains("PackSeasonStore.StillImpossibleAny(", StringComparison.Ordinal)
             && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))

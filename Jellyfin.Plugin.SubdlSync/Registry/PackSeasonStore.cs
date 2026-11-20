@@ -280,6 +280,57 @@ public static class PackSeasonStore
         }
     }
 
+    /// <summary>
+    /// F-M660 (Bediener 20.11.2026: „Die spursperre bitte per gui aufheben" und dann „Ja, aber
+    /// selectable im drop down menu"): nimmt ALLE Staffel-Urteile einer Serie/Staffel zurueck — den
+    /// Plan-Namensraum (<see cref="SeasonTag"/>) und jeden Fuell-Namensraum (<c>tag|fill</c>).
+    /// <para>
+    /// Der Datei-Reset (F-M620/F-M644) raeumt Stempel, Spur-Urteile und die Absage in der
+    /// <c>packs</c>-Zeile; die Urteile der Pack-Phase liegen aber HIER, mit der Signatur der Dateien
+    /// als Schluessel. Solange die Dateien unveraendert sind, passt die Signatur weiter — ein
+    /// aufgehobener Spursperre zum Trotz bliebe die Staffel gesperrt (gemessen am 20.11.2026 an
+    /// MobLand S02: Spur frei, Plan uebersprungen). Deshalb gibt es diesen Weg, und er ist im
+    /// Dropdown der Einstellungsseite waehlbar.
+    /// </para>
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <returns>Number of verdicts removed.</returns>
+    public static int ClearSeason(string imdbId, int season)
+    {
+        ScribeSqliteContext? db = Store();
+        if (db == null || string.IsNullOrWhiteSpace(imdbId) || season < 1)
+        {
+            return 0;
+        }
+
+        string prefix = imdbId.Trim().ToLowerInvariant() + "|"
+                        + season.ToString(CultureInfo.InvariantCulture) + "|";
+        try
+        {
+            lock (Gate)
+            {
+                // In memory filtern: die Tabelle haelt einige hundert Zeilen, und ein LIKE ueber den
+                // zusammengesetzten Schluessel waere die schlechtere Uebersetzung.
+                var rows = db.PackSeasonRows.ToList()
+                    .Where(r => r.Id.StartsWith(prefix, StringComparison.Ordinal))
+                    .ToList();
+                if (rows.Count == 0)
+                {
+                    return 0;
+                }
+
+                db.PackSeasonRows.RemoveRange(rows);
+                db.SaveChanges();
+                return rows.Count;
+            }
+        }
+        catch (Exception)
+        {
+            return 0;
+        }
+    }
+
     private static string Trunc(string? text, int max)
     {
         if (string.IsNullOrEmpty(text))

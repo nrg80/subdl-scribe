@@ -2110,6 +2110,28 @@ public sealed class ContentHashRegistry : IDisposable
     }
 
     /// <summary>
+    /// F-M660: nimmt die Staffel-Urteile der Pack-Phase fuer die Staffel zurueck, in der diese Datei
+    /// liegt. Gegenstueck zu <see cref="ReopenPackRefusals"/>, das nur die <c>packs</c>-Zeile kennt.
+    /// </summary>
+    /// <param name="mediaHash">Media hash of a file of the season.</param>
+    /// <returns>Number of season verdicts removed.</returns>
+    public int ReopenSeasonVerdicts(string? mediaHash)
+    {
+        if (string.IsNullOrEmpty(mediaHash))
+        {
+            return 0;
+        }
+
+        var media = _db.Media.FindById(mediaHash);
+        if (media == null || string.IsNullOrWhiteSpace(media.ImdbId) || media.Season is not > 0)
+        {
+            return 0;
+        }
+
+        return PackSeasonStore.ClearSeason(media.ImdbId, media.Season.Value);
+    }
+
+    /// <summary>
     /// F-M435 (operator order 03.11.2026): moves a stored handle from the upload id to the id of the
     /// published entry.
     /// <para>

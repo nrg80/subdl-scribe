@@ -1971,6 +1971,14 @@ def main():
     check("F-M533: the report switch is named without a source",
           "<span>Report broken subtitles</span>" in page_src)
 
+    # F-M660: die Staffel-Urteile der Pack-Phase sind ein eigener Speicher und muessen im Dropdown
+    # waehlbar sein — sonst bleibt eine Staffel gesperrt, obwohl die Spur laengst frei ist.
+    check("F-M660: the reset dropdown offers the pack verdicts as its own choice",
+          '<option value="pack">' in page_src
+          and '<option value="verdicts+pack">' in page_src)
+    check("F-M660: the reset block says that pack verdicts are a separate memory",
+          "Pack verdicts" in page_src and "only the pack verdicts" in page_src)
+
     # Die Zaehlung gehoert ans ENDE: stand sie mitten in der Datei, waren alle spaeteren Pruefungen
     # fuer die Zusammenfassung unsichtbar (F-M525 — zehn rote Pruefungen bei "326/326 OK").
     failed = [r for r in results if not r[1]]
