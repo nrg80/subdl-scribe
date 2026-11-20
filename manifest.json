@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.3",
-        "changelog": "v12.2.0.3: a full run (refetch, manual) builds its packs from the library and the store, not from its queue (F-M420).",
+        "version": "12.2.0.4",
+        "changelog": "v12.2.0.4: the release group survives a file extension, and a bitmap-only file says so instead of staying silent (F-M430, F-M640).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.3-dev/Jellyfin.Plugin.SubdlSync_12.2.0.3.zip",
-        "checksum": "851cf9ba4b24e8f4df0ebb297965d9f6",
-        "timestamp": "2026-11-20T04:38:36Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.4-dev/Jellyfin.Plugin.SubdlSync_12.2.0.4.zip",
+        "checksum": "2bbe15a009ce52be65a1e427b0f335bc",
+        "timestamp": "2026-11-20T04:49:34Z"
       }
     ]
   }
