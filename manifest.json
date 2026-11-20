@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.16",
-        "changelog": "v12.2.0.16: the pack key, the buffered pack upload and the upload gate name their source instead of defaulting to SubDL — the early gate had silently skipped the film source (F-M656).",
+        "version": "12.2.0.17",
+        "changelog": "v12.2.0.17: plan and collector share one memo — a \"no pack\" verdict from the filling step is now read by the plan too, so the next run does not examine the same pairs again (F-M657).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.16-dev/Jellyfin.Plugin.SubdlSync_12.2.0.16.zip",
-        "checksum": "11235bb00f8e19868684017d168c322e",
-        "timestamp": "2026-11-20T13:11:46Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.17-dev/Jellyfin.Plugin.SubdlSync_12.2.0.17.zip",
+        "checksum": "6e3151961ff280457f8668705d0892c6",
+        "timestamp": "2026-11-20T18:49:31Z"
       }
     ]
   }
