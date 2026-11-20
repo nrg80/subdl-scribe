@@ -813,6 +813,14 @@ public sealed class SeasonPackCoordinator
                 return;
             }
 
+            // F-M646 (Operator-Anweisung 20.11.2026: „Pack gebildet/ hochgeladen, sowas interessiert"):
+            // der Behaelter nennt sich, BEVOR er rausgeht — gebaut, wie viele Folgen, unter welchem
+            // Namen. Die Erfolgszeile nach dem Versand steht weiter unten.
+            LogUtil.Normal(
+                _logger,
+                "[Sub Scribe] season pack built — {Imdb} S{Season} [{Lang}]: {Count} episode(s) as one .zip\"{Name}\", sending to {Source} (F-M643).",
+                key.ImdbId, key.Season, SeasonPack.LangTag(key.Lang, key.Hi), files.Count, name + ".zip", source);
+
             result = await TvSubtitlesSender(
                 new TvPackTransfer(
                     key.ImdbId,

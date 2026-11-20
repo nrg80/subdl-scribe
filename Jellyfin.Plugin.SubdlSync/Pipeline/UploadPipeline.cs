@@ -923,7 +923,10 @@ public sealed class UploadPipeline : IPackFiller
                     if (!Registry.HasPack(packImdb, packSeason, packLang, packHi, PackEntity.TvSubtitlesSource)
                         && !string.IsNullOrEmpty(packCoordinator.LastRefusal))
                     {
-                        LogUtil.Detail(
+                        // F-M646: auch die Absage eines einzelnen tvst-Behälters steht auf der
+                        // Normal-Stufe — der Betreiber will sehen, ob gebaut und hochgeladen wurde,
+                        // und ebenso, warum nicht.
+                        LogUtil.Normal(
                             _logger,
                             "[Sub Scribe] PACK — {Imdb} S{Season} [{Lang}] tvst: no container this run ({Reason}) (F-M643)",
                             packImdb, packSeason, SeasonPack.LangTag(packLang, packHi), packCoordinator.LastRefusal);
