@@ -522,9 +522,12 @@ public sealed class SeasonPackCoordinator
 
         // F-M611: steht das Urteil „kein Pack" schon, und hat sich an den Dateien nichts geaendert, wird
         // gar nicht erst entpackt. Genau dafuer gibt es die Signatur.
+        // F-M657: gefragt werden BEIDE Namensraeume — der des Sammlers (|fill) und der des Plans.
+        int bekannt = _registry is null ? 0 : _registry.EpisodesWithLanguage(imdbId, season, lang, hi).Count;
         if (!string.IsNullOrEmpty(fillSignatur)
-            && Registry.PackSeasonStore.StillImpossible(
-                imdbId, season, SeasonPack.LangTag(lang, hi) + FillTagSuffix, fillSignatur!, out string altGrund))
+            && Registry.PackSeasonStore.StillImpossibleAny(
+                imdbId, season, SeasonPack.LangTag(lang, hi), fillSignatur!, bekannt,
+                out string altGrund, out _))
         {
             // F-M651 (Operator-Befund 20.11.2026: „Ist schon unstrukturiert"): hier stand zusaetzlich
             // eine eigene Zeile „unchanged since the last judgement — nothing extracted". Sie sagte
@@ -700,8 +703,8 @@ public sealed class SeasonPackCoordinator
 
 
 
-    /// <summary>F-M611: das Urteil „kein Pack" wird mit Signatur gespeichert, damit der naechste Lauf nicht wieder entpackt.</summary>
-    private const string FillTagSuffix = "|fill";
+    /// <summary>F-M611/F-M657: das Urteil „kein Pack" wird mit Signatur gespeichert, damit der naechste Lauf nicht wieder entpackt. Der Namensraum steht EINMAL im Store.</summary>
+    private const string FillTagSuffix = Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.FillTagSuffix;
 
     /// <summary>
     /// F-M643 (Betreiber-Vorgabe 20.11.2026: „Ja. Aber nur für den vollen lauf, refetch oder manuell"):

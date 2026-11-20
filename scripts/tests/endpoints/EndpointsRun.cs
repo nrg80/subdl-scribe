@@ -983,6 +983,22 @@ internal static class Program
             up605.Contains("we write our own marker (F-M612)", StringComparison.Ordinal)
             && up605.Contains("Provenance.OwnUploadId", StringComparison.Ordinal));
 
+        // --- F-M657: EIN Namensraum fuer Plan und Sammler --------------------------------------------
+        // Befund 20.11.2026 (Operator: „Wichtiger waere dass der Speichermerker gesetzt ist … damit er
+        // das naechste Mal nicht nochmal so lange braucht"): 522 Urteile wurden geschrieben, der Plan
+        // fragte aber einen anderen Namensraum und sah keines davon.
+        var store657 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/PackSeasonStore.cs"));
+        Check("F-M657: der Namensraum des Fuellens steht EINMAL im Store, nicht in jeder Klasse",
+            store657.Contains("public const string FillTagSuffix = \"|fill\";", StringComparison.Ordinal)
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))
+                .Contains("private const string FillTagSuffix = Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.FillTagSuffix;", StringComparison.Ordinal));
+
+        Check("F-M657: Plan UND Sammler fragen beide Namensraeume",
+            uploadSource.Contains("PackSeasonStore.StillImpossibleAny(", StringComparison.Ordinal)
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"))
+                .Contains("PackSeasonStore.StillImpossibleAny(", StringComparison.Ordinal)
+            && store657.Contains("public static bool StillImpossibleAny(", StringComparison.Ordinal));
+
         // --- F-M611: das Pack-Urteil zum Fuellversuch speichern -------------------------------------
         var coord611 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Pipeline/SeasonPackCoordinator.cs"));
         Check("F-M611: der Fuellversuch schreibt sein Urteil mit der Signatur der Staffel",
@@ -991,7 +1007,7 @@ internal static class Program
             && coord611.Contains("SeasonPack.LangTag(lang, hi) + FillTagSuffix", StringComparison.Ordinal)
             && coord611.Contains("Registry.PackSeasonStore.NoPack, reason);", StringComparison.Ordinal));
         Check("F-M611: ein gespeichertes Urteil verhindert die naechste Extraktion, solange die Signatur gleich bleibt",
-            coord611.Contains("Registry.PackSeasonStore.StillImpossible(", StringComparison.Ordinal)
+            coord611.Contains("Registry.PackSeasonStore.StillImpossibleAny(", StringComparison.Ordinal)
             && coord611.Contains("LastSkipReason = $\"no pack ({altGrund}), the verdict is stored with the files' signature (F-M611)\"", StringComparison.Ordinal)
             && coord611.Contains("LastRefusal = null;", StringComparison.Ordinal));
         Check("F-M611: beide Abbruchwege (vor und nach der Extraktion) hinterlassen ein Urteil",

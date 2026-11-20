@@ -43,6 +43,14 @@ public static class PackSeasonStore
     /// <summary>A pack was possible for this season and signature.</summary>
     public const string PackPossible = "pack";
 
+    /// <summary>
+    /// F-M657: Namensraum des FUELLENS. Der Sammler schreibt sein Urteil („kein Pack, weil Folge N nicht
+    /// beitreten kann") unter diesem Zusatz, weil er nur die Staffel-Signatur kennt; der Plan fragte
+    /// bisher ausschliesslich seinen eigenen Namensraum und sah das Urteil nie. Beide Seiten fragen
+    /// jetzt ueber <see cref="StillImpossibleAny"/>.
+    /// </summary>
+    public const string FillTagSuffix = "|fill";
+
     private static readonly object Gate = new();
 
     private static ScribeSqliteContext? _db;
@@ -176,6 +184,41 @@ public static class PackSeasonStore
 
         reason = gespeichert;
         return true;
+    }
+
+    /// <summary>
+    /// F-M657: fragt BEIDE Namensraeume — den des Plans (Sprachtag, Signatur mit Store-Anzahl) und den
+    /// des Fuellens (Sprachtag + <see cref="FillTagSuffix"/>, reine Staffel-Signatur). Ein Urteil, das
+    /// beim Sammeln entstanden ist, galt bisher nur fuer den Sammler; der Plan prüfte dasselbe Paar im
+    /// naechsten Lauf wieder an den Dateien.
+    /// </summary>
+    /// <param name="imdbId">Series IMDb id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="langTag">Language tag of the pair.</param>
+    /// <param name="seasonSignature">Signature of the season's files right now.</param>
+    /// <param name="storedTracks">How many episodes the store knows with this language.</param>
+    /// <param name="reason">Why it was judged impossible back then.</param>
+    /// <param name="fromFill">True when the verdict came from the filling step.</param>
+    /// <returns>True when a stored verdict still applies.</returns>
+    public static bool StillImpossibleAny(
+        string imdbId, int season, string langTag, string seasonSignature, int storedTracks,
+        out string reason, out bool fromFill)
+    {
+        fromFill = false;
+        string planSignatur = seasonSignature + "|store="
+            + storedTracks.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (StillImpossible(imdbId, season, langTag, planSignatur, out reason))
+        {
+            return true;
+        }
+
+        if (StillImpossible(imdbId, season, langTag + FillTagSuffix, seasonSignature, out reason))
+        {
+            fromFill = true;
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

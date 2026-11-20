@@ -4828,7 +4828,11 @@ public sealed class UploadPipeline : IPackFiller
                 // eingetroffene Spur eines fehlenden Paares nie bemerkt (die Dateien aendern sich dabei nicht).
                 string paarSignatur = saisonSignatur + "|store=" + mitSprache.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 string paarTag = SeasonPack.LangTag(language, hi);
-                if (Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.StillImpossible(entry.Key.Item1, entry.Key.Item2, paarTag, paarSignatur, out string paarGrund))
+                // F-M657: auch das Urteil des Sammlers ("kein Pack, weil Folge N nicht beitreten kann")
+                // gilt hier — sonst prueft der Plan dasselbe Paar im naechsten Lauf wieder an den Dateien.
+                if (Jellyfin.Plugin.SubScribe.Registry.PackSeasonStore.StillImpossibleAny(
+                        entry.Key.Item1, entry.Key.Item2, paarTag, saisonSignatur, mitSprache.Count,
+                        out string paarGrund, out _))
                 {
                     LogUtil.Detail(
                         _logger,
