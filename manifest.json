@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.20",
-        "changelog": "v12.2.0.20: the file reset can clear the pack-phase season verdicts too, selectable in the dropdown (F-M660).",
+        "version": "12.2.0.22",
+        "changelog": "v12.2.0.22: the download page takes tvsubtitles' season archive as stage 1 — one fetch per series, season and language instead of one per episode, with the regular and the hearing-impaired file kept apart; the single-episode page still carries whatever the archive lacks (F-M663).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.20-dev/Jellyfin.Plugin.SubdlSync_12.2.0.20.zip",
-        "checksum": "c33c0488933f4971e0c0501cfb481ed7",
-        "timestamp": "2026-11-20T23:06:04Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.22-dev/Jellyfin.Plugin.SubdlSync_12.2.0.22.zip",
+        "checksum": "6b25ca1707fc96f22876e08b1ea7ea4c",
+        "timestamp": "2026-11-21T08:02:52Z"
       }
     ]
   }
