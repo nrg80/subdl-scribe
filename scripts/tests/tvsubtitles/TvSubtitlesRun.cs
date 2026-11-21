@@ -933,6 +933,105 @@ internal static class Program
             + " Anfragen vorher/nachher=" + kaputtVorher + "/" + kaputtHandler.Requests
             + " Treffer Folge 2=" + kaputtZweiteFolge.Count);
 
+        // --- F-M664: die drei Stufen INNERHALB von tvst -------------------------------------------
+        // Betreiber-Anweisung 21.11.2026: „Innerhalb von tvst erst staffelzip dann einzel, dann hi."
+        // Die Stufen sind an den Anfragen UND an der Reihenfolge der Treffer nachweisbar; beides wird
+        // hier an einem Handler gemessen, der jede Anfrage in ihrer Reihenfolge mitschreibt.
+
+        // (a) Deckt die ZIP die regulaere Seite, wird der Einzeleintrag der Folgenseite NICHT gefragt —
+        //     obwohl die Seite eine regulaere Fassung haette. Dafuer steht in EpisodesOnPages die Folge 1.
+        var stufe1Handler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 1), EpisodesOnPages = { 1 } };
+        var stufe1Endpoint = new TvSubtitlesDownloadEndpoint(new TvSubtitlesClient(new HttpClient(stufe1Handler)));
+        var stufe1 = await stufe1Endpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 1, "en")).ConfigureAwait(false);
+        var stufe1Seiten = Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.SplitByHearingImpaired(
+            stufe1, SubtitleProvider.TvSubtitles, "en", 2, 1);
+        Check("F-M664: deckt die Staffel-ZIP die regulaere Seite, wird der Einzeleintrag der Folgenseite nicht gefragt",
+            stufe1Handler.EpisodeListPages == 0
+            && stufe1Handler.EpisodePages == 0
+            && stufe1Seiten.Regular.Count == 1
+            && stufe1Seiten.Regular[0].Url!.StartsWith("seasonpack:", StringComparison.Ordinal)
+            && !stufe1Seiten.Regular.Any(c => c.Url == "500001"),
+            "Folgenliste=" + stufe1Handler.EpisodeListPages + " Folgenseite=" + stufe1Handler.EpisodePages
+            + " regular=" + string.Join(",", stufe1Seiten.Regular.Select(c => c.Url)));
+
+        // (b) Deckt die ZIP NUR die regulaere Seite (hier: ZIP ohne HI-Fassung), traegt der Einzeleintrag
+        //     der Folgenseite die regulaere Seite NICHT mehr — die Folgenseite wird fuer Stufe 3 gelesen,
+        //     ihre regulaere Zeile faellt aber weg. Die HI-Fassung kommt aus dieser Seite.
+        var stufe2Handler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 1, withHi: false), EpisodesOnPages = { 1 } };
+        var stufe2Endpoint = new TvSubtitlesDownloadEndpoint(new TvSubtitlesClient(new HttpClient(stufe2Handler)));
+        var stufe2 = await stufe2Endpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 1, "en")).ConfigureAwait(false);
+        var stufe2Seiten = Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.SplitByHearingImpaired(
+            stufe2, SubtitleProvider.TvSubtitles, "en", 2, 1);
+        Check("F-M664: ein ZIP ohne HI-Fassung holt die HI-Seite von der Folgenseite — deren regulaerer Eintrag wird nicht uebernommen",
+            stufe2Handler.EpisodePages > 0
+            && stufe2Seiten.Regular.Count == 1
+            && stufe2Seiten.Regular[0].Url!.StartsWith("seasonpack:", StringComparison.Ordinal)
+            && stufe2Seiten.HearingImpaired.Count == 1
+            && stufe2Seiten.HearingImpaired[0].Url == "600001",
+            "regular=" + string.Join(",", stufe2Seiten.Regular.Select(c => c.Url))
+            + " hi=" + string.Join(",", stufe2Seiten.HearingImpaired.Select(c => c.Url))
+            + " Folgenseite=" + stufe2Handler.EpisodePages);
+
+        // (c) HI kommt NACH dem Einzelweg: in der Antwort steht jede regulaere Zeile vor jeder HI-Zeile,
+        //     und die Stufe-3-Zeile stammt aus dem Lauf, der nach der Folgenseite stattfand. Gemessen an
+        //     der Folge, die in der ZIP fehlt (Stufe 1 faellt aus, Stufe 2 traegt den Einzeleintrag, die
+        //     HI-Fassung derselben Seite folgt danach).
+        var stufe3Handler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 1), EpisodesOnPages = { 5 } };
+        var stufe3Endpoint = new TvSubtitlesDownloadEndpoint(new TvSubtitlesClient(new HttpClient(stufe3Handler)));
+        var stufe3 = await stufe3Endpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 5, "en")).ConfigureAwait(false);
+        int ersterHi = -1;
+        int letzterRegulaer = -1;
+        for (int i = 0; i < stufe3.Count; i++)
+        {
+            if (stufe3[i].HearingImpaired && ersterHi < 0)
+            {
+                ersterHi = i;
+            }
+            else if (!stufe3[i].HearingImpaired)
+            {
+                letzterRegulaer = i;
+            }
+        }
+
+        Check("F-M664: die HI-Treffer stehen hinter JEDER regulaeren Zeile — Stufe 3 kommt zuletzt",
+            stufe3.Count == 2 && ersterHi == 1 && letzterRegulaer == 0
+            && !stufe3[0].HearingImpaired && stufe3[1].HearingImpaired
+            && !stufe3[0].Id.StartsWith("seasonpack:", StringComparison.Ordinal),
+            "Reihenfolge=" + string.Join(" | ", stufe3.Select(h => h.Id + "/hi=" + h.HearingImpaired)));
+
+        // Die Folge 5 der ZIP gibt es nicht: ihre regulaere Fassung ist der Einzeleintrag, ihre
+        // HI-Fassung die zweite Zeile derselben Seite — und beide kommen aus der Folgenseite.
+        var stufe3Seiten = Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.SplitByHearingImpaired(
+            stufe3, SubtitleProvider.TvSubtitles, "en", 2, 5);
+
+        // (d) Die Stufen sind auch an den ANFRAGEN ablesbar: Serienliste, Staffelseite, ZIP — und erst
+        //     danach die Folgenseite. Vor der ZIP wird keine Folgenseite gefragt.
+        var reihenfolge = stufe3Handler.Order;
+        int zipStelle = reihenfolge.IndexOf("download-3234-2-en.html");
+        int seitenListeStelle = reihenfolge.IndexOf("tvshow-3234-2.html");
+        bool ersteFolgenSeiteNachZip = reihenfolge
+            .Select((name, i) => (name, i))
+            .Where(x => x.name.StartsWith("episode-", StringComparison.Ordinal))
+            .All(x => zipStelle >= 0 && x.i > zipStelle);
+        Check("F-M664: die Anfragen laufen in Stufenfolge — Staffel-ZIP, dann die Folgenseite",
+            zipStelle == 2 && seitenListeStelle > zipStelle && ersteFolgenSeiteNachZip
+            && reihenfolge[0] == "add.html"
+            && reihenfolge[1] == "subtitle-3234-2-en.html",
+            "Anfragen=" + string.Join(" > ", reihenfolge));
+
+        // (e) Regression: die Folge, die in der ZIP fehlt, geht weiter ueber ihre Folgenseite — und ihre
+        //     regulaere Fassung ist der Einzeleintrag, nicht ein ZIP-Eintrag.
+        Check("F-M664: eine Folge ausserhalb der ZIP kommt weiter ueber den Einzeleintrag der Folgenseite",
+            stufe3Seiten.Regular.Count == 1
+            && stufe3Seiten.Regular[0].Url == "500005"
+            && stufe3Seiten.HearingImpaired.Count == 1
+            && stufe3Seiten.HearingImpaired[0].Url == "600005",
+            "regular=" + string.Join(",", stufe3Seiten.Regular.Select(c => c.Url))
+            + " hi=" + string.Join(",", stufe3Seiten.HearingImpaired.Select(c => c.Url)));
+
         if (_failures > 0)
         {
 
@@ -949,7 +1048,7 @@ internal static class Program
     /// Pruefung sehen kann, ob der Griff die richtige Fassung liefert — vertauschte Bytes waeren sonst
     /// nicht von richtigen zu unterscheiden.
     /// </summary>
-    private static byte[] BuildSeasonZipFor(int fromEpisode, int toEpisode)
+    private static byte[] BuildSeasonZipFor(int fromEpisode, int toEpisode, bool withHi = true)
     {
         using var buffer = new MemoryStream();
         using (var archive = new System.IO.Compression.ZipArchive(
@@ -957,7 +1056,10 @@ internal static class Program
         {
             for (int folge = fromEpisode; folge <= toEpisode; folge++)
             {
-                foreach (bool hi in new[] { false, true })
+                // F-M664: `withHi: false` baut die Fassung, die viele Staffeln wirklich haben — regulaer
+                // vorhanden, HI nur auf der Folgenseite. Nur damit laesst sich pruefen, ob die HI-Fassung
+                // wirklich erst NACH dem Einzelweg geholt wird.
+                foreach (bool hi in withHi ? new[] { false, true } : new[] { false })
                 {
                     string member = "MobLand - 2x" + folge.ToString("00", CultureInfo.InvariantCulture)
                         + " - Folge." + (hi ? "HI." : string.Empty) + "en.srt";
@@ -1002,11 +1104,18 @@ internal static class Program
 
         public int Requests { get; private set; }
 
+        /// <summary>
+        /// F-M664: jede Anfrage in ihrer Reihenfolge, nur der Dateiname. Damit laesst sich die
+        /// Stufenfolge (Staffel-ZIP vor Folgenseite) nachweisen statt behaupten.
+        /// </summary>
+        public List<string> Order { get; } = new();
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests++;
             var name = Path.GetFileName(request.RequestUri!.AbsolutePath);
+            Order.Add(name);
 
             if (name == "add.html")
             {

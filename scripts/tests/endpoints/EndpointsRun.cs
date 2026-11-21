@@ -257,26 +257,93 @@ internal static class Program
             && !TvSubtitlesDownloadEndpoint.TryParseSeasonPackId("seasonpack:3234:2:en", out _, out _, out _, out _)
             && !TvSubtitlesDownloadEndpoint.TryParseSeasonPackId(null, out _, out _, out _, out _));
 
-        // ---- 5c. F-M663: die Naht im Lauf (Quelltext-Grenzen, wie die uebrigen F-M5xx-Pruefungen) --
-        var pipeline663 = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
-        Check("F-M663: die HI-Treffer der Zusatzquellen landen im HI-Pool und nicht in der regulaeren Liste",
-            pipeline663.Contains("fremdHiProSprache", StringComparison.Ordinal)
-            && pipeline663.Contains("hiCandidates.AddRange(liste);", StringComparison.Ordinal)
-            && pipeline663.Contains("SplitByHearingImpaired(", StringComparison.Ordinal)
-            && pipeline663.Contains("hiZiel.AddRange(hi);", StringComparison.Ordinal));
+        // ---- 5c. F-M664: die Naht im Lauf (Quelltext-Grenzen, wie die uebrigen F-M5xx-Pruefungen) --
+        var pipeline664 = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check("F-M664: die HI-Treffer werden JE ENGINE gefuehrt, nicht in einem gemeinsamen Topf",
+            pipeline664.Contains("var hiProQuelle = new Dictionary<Configuration.SubtitleProvider, List<SubtitleCandidate>>();", StringComparison.Ordinal)
+            && pipeline664.Contains("hiProQuelle[MainSearchSource] = ergebnis.HiCandidates;", StringComparison.Ordinal)
+            && pipeline664.Contains("hiProQuelle[quelle] = hiKorb;", StringComparison.Ordinal)
+            && !pipeline664.Contains("fremdHiProSprache", StringComparison.Ordinal)
+            && !pipeline664.Contains("hiCandidates.AddRange(liste);", StringComparison.Ordinal)
+            && !pipeline664.Contains("hiCandidates = ergebnis.HiCandidates;", StringComparison.Ordinal),
+            "ein Korb je Quelle, kein Zusammenkippen in den SubDL-Pool");
+        Check("F-M664: die HI-Seite wird Engine fuer Engine in Frage-Reihenfolge gelesen",
+            pipeline664.Contains("var hiCandidates = HiPoolForLanguage(quellenReihenfolge, hiProQuelle, lang);", StringComparison.Ordinal)
+            && pipeline664.Contains("public static List<SubtitleCandidate> HiPoolForLanguage(", StringComparison.Ordinal)
+            && pipeline664.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal));
+        Check("F-M664: die Reihenfolge der ENGINES bleibt die GUI-Einstellung",
+            pipeline664.Contains("Api.Endpoints.SourceOrder.ForMedia(_config.DownloadOrder, isSeries)", StringComparison.Ordinal)
+            && pipeline664.Contains("var quellenReihenfolge = DownloadQueryOrder(isSeries);", StringComparison.Ordinal)
+            && pipeline664.IndexOf("var quellenReihenfolge = DownloadQueryOrder(isSeries);", StringComparison.Ordinal)
+               < pipeline664.IndexOf("var hiCandidates = HiPoolForLanguage(quellenReihenfolge, hiProQuelle, lang);", StringComparison.Ordinal),
+            "die Fragen-Reihenfolge kommt aus der GUI, die HI-Seite folgt ihr");
         Check("F-M663: die HI-Fassung wird bei der QUELLE des Kandidaten geholt, nicht ueber SubDLs Archiv",
-            pipeline663.Contains("hi.Provider == MainSearchSource", StringComparison.Ordinal)
-            && pipeline663.Split(": await FetchForeignHitAsync(hi, ct)").Length - 1 == 2
-            && pipeline663.Contains("FetchForeignHitAsync(SubtitleCandidate hit, CancellationToken ct)", StringComparison.Ordinal)
-            && !pipeline663.Contains("DownloadOutcome hiDl = await FetchArchiveAsync", StringComparison.Ordinal),
+            pipeline664.Contains("hi.Provider == MainSearchSource", StringComparison.Ordinal)
+            && pipeline664.Split(": await FetchForeignHitAsync(hi, ct)").Length - 1 == 2
+            && pipeline664.Contains("FetchForeignHitAsync(SubtitleCandidate hit, CancellationToken ct)", StringComparison.Ordinal)
+            && !pipeline664.Contains("DownloadOutcome hiDl = await FetchArchiveAsync", StringComparison.Ordinal),
             "SubDL-Zweig behaelt sein Archiv, der fremde Zweig geht ueber den Endpunkt");
-        var tvstSource663 = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/TvSubtitlesEndpoints.cs"));
-        Check("F-M663: die Suche fragt zuerst die Staffel-ZIP und laesst die Folgenseite nur fuer die fehlende Seite laufen",
-            tvstSource663.Contains("SeasonPackAsync(", StringComparison.Ordinal)
-            && tvstSource663.Contains("if (regulaerGedeckt && hiGedeckt)", StringComparison.Ordinal)
-            && tvstSource663.IndexOf("SeasonPackAsync(", StringComparison.Ordinal)
-               < tvstSource663.IndexOf("EpisodePagesAsync(", StringComparison.Ordinal),
+        Check("F-M663: die Antwort einer Quelle wird in zwei Seiten geteilt, der HI-Teil geht in ihren Korb",
+            pipeline664.Contains("SplitByHearingImpaired(", StringComparison.Ordinal)
+            && pipeline664.Contains("hiZiel.AddRange(hi);", StringComparison.Ordinal));
+
+        // Die reine Funktion ohne Lauf: zwei Engines, beide mit eigenen HI-Treffern. Geprueft wird, dass
+        // die Ausgabe der Frage-Reihenfolge folgt, die Sprache filtert — und dass KEIN Korb in den
+        // anderen wandert (jeder Kandidat traegt die Quelle seines eigenen Korbs).
+        var tvstHi = new List<SubtitleCandidate>
+        {
+            new() { Provider = SubtitleProvider.TvSubtitles, Language = "DE", Url = "seasonpack:3234:2:de:3", ReleaseName = "MobLand - 2x05 - de.HI", HearingImpaired = true },
+        };
+        var subdlHi = new List<SubtitleCandidate>
+        {
+            new() { Provider = SubtitleProvider.Subdl, Language = "DE", Url = "170678", ReleaseName = "MobLand.S02E05.GERMAN.HI", HearingImpaired = true },
+            new() { Provider = SubtitleProvider.Subdl, Language = "EN", Url = "170679", ReleaseName = "MobLand.S02E05.ENGLISH.HI", HearingImpaired = true },
+        };
+        var koerbe = new Dictionary<SubtitleProvider, List<SubtitleCandidate>>
+        {
+            [SubtitleProvider.TvSubtitles] = tvstHi,
+            [SubtitleProvider.Subdl] = subdlHi,
+        };
+        var tvstZuerst = Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.HiPoolForLanguage(
+            new[] { SubtitleProvider.TvSubtitles, SubtitleProvider.Subdl }, koerbe, "DE");
+        var subdlZuerst = Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.HiPoolForLanguage(
+            new[] { SubtitleProvider.Subdl, SubtitleProvider.TvSubtitles }, koerbe, "DE");
+        Check("F-M664: die HI-Seite folgt der GUI-Reihenfolge der Engines",
+            tvstZuerst.Select(c => c.Provider).SequenceEqual(new[] { SubtitleProvider.TvSubtitles, SubtitleProvider.Subdl })
+            && subdlZuerst.Select(c => c.Provider).SequenceEqual(new[] { SubtitleProvider.Subdl, SubtitleProvider.TvSubtitles }),
+            "tvst-first=" + string.Join(">", tvstZuerst.Select(c => c.Provider))
+            + " subdl-first=" + string.Join(">", subdlZuerst.Select(c => c.Provider)));
+        Check("F-M664: jede Engine bringt nur ihre eigenen HI-Treffer mit",
+            tvstZuerst.Count == 2 && subdlZuerst.Count == 2
+            && tvstZuerst.Where(c => c.Provider == SubtitleProvider.TvSubtitles).All(c => c.Url!.StartsWith("seasonpack:", StringComparison.Ordinal))
+            && tvstZuerst.Where(c => c.Provider == SubtitleProvider.Subdl).All(c => !c.Url!.StartsWith("seasonpack:", StringComparison.Ordinal))
+            && tvstZuerst.All(c => c.Language == "DE")
+            && subdlZuerst.All(c => c.Language == "DE"),
+            "tvst=" + string.Join(",", tvstHi.Select(c => c.Url)) + " subdl=" + string.Join(",", subdlHi.Select(c => c.Url)));
+        Check("F-M664: eine Engine, die nicht gefragt wurde, steht auch nicht auf der HI-Seite",
+            Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.HiPoolForLanguage(
+                new[] { SubtitleProvider.Subdl }, koerbe, "DE").All(c => c.Provider == SubtitleProvider.Subdl)
+            && Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.HiPoolForLanguage(
+                Array.Empty<SubtitleProvider>(), koerbe, "DE").Count == 0
+            && Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.HiPoolForLanguage(
+                new[] { SubtitleProvider.TvSubtitles, SubtitleProvider.Subdl }, koerbe, "FR").Count == 0);
+
+        var tvstSource664 = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/TvSubtitlesEndpoints.cs"));
+        Check("F-M664: in tvst steht die Staffel-ZIP vor dem Einzeleintrag der Folgenseite",
+            tvstSource664.Contains("SeasonPackAsync(", StringComparison.Ordinal)
+            && tvstSource664.IndexOf("SeasonPackAsync(", StringComparison.Ordinal)
+               < tvstSource664.IndexOf("EpisodePagesAsync(", StringComparison.Ordinal)
+            && tvstSource664.Contains("if (!regulaerGedeckt || !hiGedeckt)", StringComparison.Ordinal),
             "Staffel-ZIP vor der Folgenliste");
+        Check("F-M664: die HI-Treffer von tvst gehen erst NACH beiden regulaeren Stufen weiter",
+            tvstSource664.Contains("var hiTreffer = new List<SubtitleHit>();", StringComparison.Ordinal)
+            && tvstSource664.Contains("hiTreffer.Add(zipTreffer);", StringComparison.Ordinal)
+            && tvstSource664.Contains("hiTreffer.Add(treffer);", StringComparison.Ordinal)
+            && tvstSource664.IndexOf("hits.AddRange(hiTreffer);", StringComparison.Ordinal)
+               > tvstSource664.IndexOf("hiTreffer.Add(treffer);", StringComparison.Ordinal)
+            && tvstSource664.IndexOf("hits.AddRange(hiTreffer);", StringComparison.Ordinal)
+               > tvstSource664.LastIndexOf("EpisodePagesAsync(", StringComparison.Ordinal),
+            "Stufe 3 wird am Ende angehaengt, nicht zwischen den Stufen gesammelt");
 
         // ---- 6. the tvsubtitles upload endpoint: dry run, and refusals -------------------------
         var tvUpload = new TvSubtitlesUploadEndpoint(tvClient, dryRun: true);

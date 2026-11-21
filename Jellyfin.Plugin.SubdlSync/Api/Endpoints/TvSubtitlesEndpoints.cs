@@ -100,7 +100,13 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
         // damit der nächste Lauf die Serienliste gar nicht erst holen muss (F-M501).
         _client.LastResolvedShowId = showId.Value;
 
+        // F-M664 (Betreiber-Anweisung 21.11.2026: „Innerhalb von tvst erst staffelzip dann einzel, dann
+        // hi."): zwei Listen, weil es zwei Seiten und drei Stufen sind. `hits` traegt die REGULAERE Seite
+        // (Stufe 1 und 2), `hiTreffer` die HI-Seite (Stufe 3). Die HI-Treffer werden erst am Ende
+        // angehaengt — eingesammelt werden sie dort, wo sie anfallen (ZIP-Namen, Ohr-Bild), aber
+        // weitergegeben erst, nachdem beide regulaeren Stufen durch sind.
         var hits = new List<SubtitleHit>();
+        var hiTreffer = new List<SubtitleHit>();
 
         // F-M663 (Bediener-Anweisung 21.11.2026): STUFE 1 ist die Staffel-ZIP. Gemessen an MobLand S02:
         // 27 Dateien fuer 9 Folgen in EINER ZIP je Sprache (610.807 B), Regular und HI durch `.HI.`
@@ -140,99 +146,110 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
                     continue;
                 }
 
-                hits.Add(new SubtitleHit(
+                var zipTreffer = new SubtitleHit(
                     SubtitleProvider.TvSubtitles,
                     SeasonPackId(showId.Value, query.Season, language, i),
                     datei.Language,
                     string.Empty,
                     release,
                     false,
-                    datei.HearingImpaired));
+                    datei.HearingImpaired);
 
+                // F-M664: die Marke entscheidet die SEITE, nicht die Stufe. Die regulaere Fassung der
+                // ZIP ist Stufe 1 und geht sofort weiter; die HI-Fassung wandert in den Stufe-3-Korb und
+                // wird erst nach dem Einzelweg angehaengt.
                 if (datei.HearingImpaired)
                 {
                     hiGedeckt = true;
+                    hiTreffer.Add(zipTreffer);
                 }
                 else
                 {
                     regulaerGedeckt = true;
+                    hits.Add(zipTreffer);
                 }
             }
         }
 
-        // F-M663: STUFE 2 ist der heutige Weg (Folgenseite) — und sie laeuft fuer JEDE Seite weiter, die
-        // Stufe 1 nicht gedeckt hat. Fehlt die Folge in der ZIP, fehlt dort nur die HI-Fassung, oder
-        // ist die ZIP kaputt, blockiert Stufe 1 den Einzelweg also nicht.
-        if (regulaerGedeckt && hiGedeckt)
+        // F-M663/F-M664: STUFE 2 ist der Einzelweg der Folgenseite, und STUFE 3 ist HI. Beide brauchen
+        // dieselbe Seite; gelesen wird sie EINMAL, aber jede Seite nimmt nur, was ihre Stufe deckt:
+        //   * regulaere Eintraege nur, solange Stufe 1 (ZIP) den regulaeren Platz nicht gedeckt hat,
+        //   * HI-Eintraege nur, solange die HI-Seite offen ist — und sie wandern in `hiTreffer`.
+        // Ist beides gedeckt, wird die Folgenseite gar nicht gefragt.
+        if (!regulaerGedeckt || !hiGedeckt)
         {
-            return hits;
-        }
+            var pages = await _client.EpisodePagesAsync(showId.Value, query.Season, cancellationToken)
+                .ConfigureAwait(false);
 
-        var pages = await _client.EpisodePagesAsync(showId.Value, query.Season, cancellationToken)
-            .ConfigureAwait(false);
-
-        foreach (var page in pages)
-        {
-            var (season, episode) = await _client.EpisodeLabelAsync(page, cancellationToken).ConfigureAwait(false);
-
-            // F-M533: eine Staffel/Folge-Angabe ausserhalb der Werte, die das Formular kennt, ist ein
-            // Falscheintrag der Seite — melden und die Seite ueberspringen, nicht raten.
-            if (await TvstMetadataChecks.EmitAsync(
-                    _client, TvstMetadataChecks.CheckEpisodeLabel(season, episode), null, null, cancellationToken)
-                    .ConfigureAwait(false))
+            foreach (var page in pages)
             {
-                LastRejectedByFormat++;
-                continue;
-            }
+                var (season, episode) = await _client.EpisodeLabelAsync(page, cancellationToken).ConfigureAwait(false);
 
-            if (season != query.Season || episode != query.Episode)
-            {
-                continue;
-            }
-
-            var entries = await _client.EntriesAsync(page, cancellationToken).ConfigureAwait(false);
-            foreach (var e in entries)
-            {
-                if (!string.Equals(e.Language, language, StringComparison.Ordinal))
+                // F-M533: eine Staffel/Folge-Angabe ausserhalb der Werte, die das Formular kennt, ist ein
+                // Falscheintrag der Seite — melden und die Seite ueberspringen, nicht raten.
+                if (await TvstMetadataChecks.EmitAsync(
+                        _client, TvstMetadataChecks.CheckEpisodeLabel(season, episode), null, null, cancellationToken)
+                        .ConfigureAwait(false))
                 {
-                    continue;
-                }
-
-                // F-M663: eine Seite, die Stufe 1 schon gedeckt hat, wird hier nicht ein zweites Mal
-                // gefuellt — und eine HI-Datei landet nie auf der regulaeren Seite (und umgekehrt).
-                if (e.HearingImpaired ? hiGedeckt : regulaerGedeckt)
-                {
-                    continue;
-                }
-
-                var falsch = TvstMetadataChecks.CheckEntry(e);
-                if (falsch.Count > 0)
-                {
-                    await TvstMetadataChecks.EmitAsync(_client, falsch, e.SubtitleId, e.Release, cancellationToken)
-                        .ConfigureAwait(false);
                     LastRejectedByFormat++;
                     continue;
                 }
 
-                hits.Add(new SubtitleHit(
-                    SubtitleProvider.TvSubtitles, e.SubtitleId, e.Language, e.Rip, e.Release, false, e.HearingImpaired));
-
-                if (e.HearingImpaired)
+                if (season != query.Season || episode != query.Episode)
                 {
-                    hiGedeckt = true;
+                    continue;
                 }
-                else
-                {
-                    regulaerGedeckt = true;
-                }
-            }
 
-            if (regulaerGedeckt && hiGedeckt)
-            {
-                break;
+                var entries = await _client.EntriesAsync(page, cancellationToken).ConfigureAwait(false);
+                foreach (var e in entries)
+                {
+                    if (!string.Equals(e.Language, language, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    // F-M663/F-M664: eine Seite, die ihre Stufe schon gedeckt hat, wird hier nicht ein
+                    // zweites Mal gefuellt — und eine HI-Datei landet nie auf der regulaeren Seite.
+                    if (e.HearingImpaired ? hiGedeckt : regulaerGedeckt)
+                    {
+                        continue;
+                    }
+
+                    var falsch = TvstMetadataChecks.CheckEntry(e);
+                    if (falsch.Count > 0)
+                    {
+                        await TvstMetadataChecks.EmitAsync(_client, falsch, e.SubtitleId, e.Release, cancellationToken)
+                            .ConfigureAwait(false);
+                        LastRejectedByFormat++;
+                        continue;
+                    }
+
+                    var treffer = new SubtitleHit(
+                        SubtitleProvider.TvSubtitles, e.SubtitleId, e.Language, e.Rip, e.Release, false, e.HearingImpaired);
+
+                    if (e.HearingImpaired)
+                    {
+                        hiGedeckt = true;
+                        hiTreffer.Add(treffer);
+                    }
+                    else
+                    {
+                        regulaerGedeckt = true;
+                        hits.Add(treffer);
+                    }
+                }
+
+                if (regulaerGedeckt && hiGedeckt)
+                {
+                    break;
+                }
             }
         }
 
+        // F-M664: STUFE 3 — erst JETZT gehen die HI-Treffer weiter, nach der Staffel-ZIP und nach dem
+        // Einzeleintrag. Sie stehen deshalb hinter jeder regulaeren Zeile: wer die Antwort liest, sieht
+        // die Reihenfolge der Stufen, nicht die Reihenfolge der Abrufe.
+        hits.AddRange(hiTreffer);
         return hits;
     }
 

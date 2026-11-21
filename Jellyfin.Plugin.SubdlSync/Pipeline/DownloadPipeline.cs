@@ -1620,15 +1620,20 @@ public sealed class DownloadPipeline : IDisposable
         // Zusatzquelle ihre Treffer je Sprache — nach der Schleife ist jede gefragte Quelle genau
         // einmal gelaufen, und keine hat auf die andere gewartet.
         List<SubtitleCandidate> candidates = new();
-        List<SubtitleCandidate> hiCandidates = new();
         bool usedBackup = false;
         int thresholdPassCount = 0;
         var fremdProSprache = new Dictionary<string, List<SubtitleCandidate>>(StringComparer.OrdinalIgnoreCase);
 
-        // F-M663: die HI-Treffer der Zusatzquellen getrennt halten. Eine regulaere Datei darf die
-        // HI-Seite nie fuellen und umgekehrt — die Trennung passiert deshalb HIER, an der einen Stelle,
-        // an der die Antwort einer Zusatzquelle ankommt, und nicht erst beim Ablegen.
-        var fremdHiProSprache = new Dictionary<string, List<SubtitleCandidate>>(StringComparer.OrdinalIgnoreCase);
+        // F-M664 (Betreiber-Anweisung 21.11.2026: „Jede engine arbeitet fur sich"): die HI-Treffer
+        // werden JE ENGINE gefuehrt, nicht in einem gemeinsamen Topf. Der Schluessel ist die Quelle;
+        // gelesen wird die Sammlung in der Reihenfolge, in der die Engines gefragt wurden
+        // (`quellenReihenfolge`) — siehe `HiPoolForLanguage` weiter unten.
+        //
+        // F-M663 hat die zwei Seiten EINER Antwort getrennt (regulaer gegen HI). Das reichte nicht:
+        // die HI-Treffer aller Zusatzquellen wurden danach in die Liste gekippt, die auch der
+        // SubDL-HI-Pool speist — damit konnte die HI-Seite der einen Engine von der anderen gefuellt
+        // werden. Hier steht deshalb ein Korb JE QUELLE, und keiner kennt den anderen.
+        var hiProQuelle = new Dictionary<Configuration.SubtitleProvider, List<SubtitleCandidate>>();
 
         // F-M504: welche Quellen dieser Vorgang TATSAECHLICH gefragt hat, in Frage-Reihenfolge. Die
         // Abschlusszeile nennt genau diese Liste; eine uebersprungene Quelle (Schalter aus oder nicht
@@ -1772,7 +1777,9 @@ public sealed class DownloadPipeline : IDisposable
             }
 
             candidates = ergebnis.Candidates;
-            hiCandidates = ergebnis.HiCandidates;
+            // F-M664: der HI-Pool der Hauptsuche ist der Korb DIESER Engine — er wird nicht mit dem
+            // einer Zusatzquelle geteilt.
+            hiProQuelle[MainSearchSource] = ergebnis.HiCandidates;
             usedBackup = ergebnis.UsedFilenameFallback;
             thresholdPassCount = ergebnis.ThresholdPassCount;
 
@@ -1862,14 +1869,19 @@ public sealed class DownloadPipeline : IDisposable
                     ? bisher
                     : new List<SubtitleCandidate>();
                 _letzteFrageOhneAntwort = false;
-                if (!fremdHiProSprache.TryGetValue(lang, out var hiKorb))
+
+                // F-M664: der HI-Korb DIESER Quelle. Er lebt so lange wie der Vorgang, weil eine
+                // Engine mehrere Sprachen liefert — und er ist der einzige, den diese Quelle fuellt.
+                if (!hiProQuelle.TryGetValue(quelle, out var hiKorb))
                 {
                     hiKorb = new List<SubtitleCandidate>();
-                    fremdHiProSprache[lang] = hiKorb;
+                    hiProQuelle[quelle] = hiKorb;
                 }
 
-                // F-M663: die Methode gibt nur die regulaere Seite zurueck; was sie als HI erkennt,
-                // landet in `hiKorb` und damit im HI-Pool — nicht in dieser Liste.
+                // F-M663/F-M664: die Methode gibt nur die regulaere Seite zurueck; was sie als HI
+                // erkennt, landet in `hiKorb` — dem HI-Pool DIESER Engine, nicht in dieser Liste und
+                // nicht im Korb einer anderen Quelle. Die Stufenfolge innerhalb von tvst (ZIP →
+                // Einzeleintrag → HI) entscheidet der Endpunkt; hier kommt sie fertig an.
                 treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, hiKorb, ct).ConfigureAwait(false));
 
                 if (_letzteFrageOhneAntwort)
@@ -1890,16 +1902,15 @@ public sealed class DownloadPipeline : IDisposable
             gefragteQuellen.Add(quelle);
         }
 
-        // F-M663: die HI-Treffer der Zusatzquellen gehoeren in DEN Pool, den die HI-Seite leert. Sie
-        // haengen an derselben Bedingung wie der SubDL-HI-Pool: ohne `DownloadHearingImpaired` gibt es
-        // keine HI-Seite zu fuellen, also wird auch nichts eingetragen (und der Fall „HI-Fassung als
-        // Hauptspur" bleibt aus, wie bei SubDL).
-        if (_config.DownloadHearingImpaired)
+        // F-M663/F-M664: die HI-Treffer bleiben in ihren Koerben. Sie haengen an derselben Bedingung wie
+        // der SubDL-HI-Pool: ohne `DownloadHearingImpaired` gibt es keine HI-Seite zu fuellen, also wird
+        // auch nichts gelesen (und der Fall „HI-Fassung als Hauptspur" bleibt aus, wie bei SubDL).
+        // GEMISCHT wird nichts: bis F-M663 kippte hier jede fremde Liste in `hiCandidates`, den Topf der
+        // Hauptsuche. Gelesen wird die Sammlung jetzt JE SPRACHE ueber `HiPoolForLanguage`, Engine fuer
+        // Engine in Frage-Reihenfolge (unten in der Sprachschleife) — jede Engine fuellt nur ihre Seite.
+        if (!_config.DownloadHearingImpaired)
         {
-            foreach (var liste in fremdHiProSprache.Values)
-            {
-                hiCandidates.AddRange(liste);
-            }
+            hiProQuelle.Clear();
         }
 
         // F-M591: hat KEINE der gefragten Quellen geantwortet, ist das ein Ausfall der Seiten und kein
@@ -2012,7 +2023,11 @@ public sealed class DownloadPipeline : IDisposable
         if (!_config.AllowAiTranslatedSubs)
         {
             int droppedAi = AiTranslatedSubs.Remove(candidates);
-            droppedAi += AiTranslatedSubs.Remove(hiCandidates);
+            // F-M664: jeder Engine-Korb wird einzeln gefiltert — die Regel gilt je Kandidat, nicht je Topf.
+            foreach (var hiKorb in hiProQuelle.Values)
+            {
+                droppedAi += AiTranslatedSubs.Remove(hiKorb);
+            }
             if (droppedAi > 0)
             {
                 summary.AiUploaderFiltered += droppedAi;
@@ -2087,6 +2102,12 @@ public sealed class DownloadPipeline : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             var langCands = candidates.Where(c => c.Language == lang).ToList();
+
+            // F-M664 (Betreiber-Anweisung 21.11.2026: „Jede engine arbeitet fur sich"): die HI-Seite
+            // DIESER Sprache, Engine fuer Engine in der Reihenfolge, in der gefragt wurde. Kein Korb
+            // kennt einen anderen — wer zuerst gefragt wurde, steht auch auf der HI-Seite zuerst, und
+            // eine Engine ohne eigene HI-Treffer bringt keine fremden mit.
+            var hiCandidates = HiPoolForLanguage(quellenReihenfolge, hiProQuelle, lang);
 
             // F-M485: bevor eine Sprache als „nicht verfügbar" gilt, bekommen die Zusatzquellen ihre
             // Gelegenheit — aber nur, wenn ihr Schalter an ist. Die Treffer laufen danach durch
@@ -4401,8 +4422,12 @@ public sealed class DownloadPipeline : IDisposable
                 }
             }
 
-            // F-M663: die Antwort wird an EINER Stelle in die zwei Seiten geteilt — die regulaere geht
-            // zurueck, die HI-Treffer in den Korb des Aufrufers.
+            // F-M663/F-M664: die Antwort wird an EINER Stelle in die zwei Seiten geteilt — die regulaere
+            // geht zurueck, die HI-Treffer in den Korb DIESER Engine. Fuer tvst heisst das: der Endpunkt
+            // hat die Staffel-ZIP (Stufe 1) und den Einzeleintrag der Folgenseite (Stufe 2) schon
+            // abgearbeitet und seine HI-Treffer HINTER beide gelegt (Stufe 3) — hier wird diese fertige
+            // Reihenfolge nur noch gelesen. Der Korb gehoert zur Quelle des Aufrufs, nicht zu einer
+            // anderen Engine und nicht zum SubDL-Pool.
             var (regulaer, hi) = SplitByHearingImpaired(
                 hits, quelle, lang, isSeries ? season : 0, isSeries ? episode : 0);
             hiZiel.AddRange(hi);
@@ -4483,6 +4508,57 @@ public sealed class DownloadPipeline : IDisposable
         }
 
         return (regulaer, hi);
+    }
+
+    /// <summary>
+    /// F-M664: die HI-Seite EINER Sprache — Engine fuer Engine, in der Reihenfolge, in der die Engines
+    /// gefragt wurden.
+    /// <para>
+    /// Der Betreiber hat drei Dinge verlangt, und alle drei stehen hier: die ENGINES untereinander
+    /// entscheidet die GUI-Reihenfolge (die Liste kommt aus <c>DownloadQueryOrder</c>); INNERHALB einer
+    /// Engine ist die HI-Seite das Letzte, was sie beitraegt (der Endpunkt liefert ihre Treffer hinter
+    /// beiden regulaeren Stufen); und keine Engine fuellt die Seite einer anderen — jeder Korb wird nur
+    /// fuer sich gelesen, nie zusammengeschuettet.
+    /// </para>
+    /// <para>
+    /// Reine Funktion, damit sie ohne Lauf pruefbar ist: die Reihenfolge der Ausgabe haengt allein an
+    /// der uebergebenen Quellen-Reihenfolge und an den Koerben, die zu ihr passen. Ein Korb einer
+    /// Quelle, die gar nicht gefragt wurde, steht nicht in der Ausgabe — gefragt wird, was die GUI
+    /// sagt, nicht was zufaellig im Speicher liegt.
+    /// </para>
+    /// </summary>
+    /// <param name="quellenReihenfolge">Die Engines in Frage-Reihenfolge (GUI, gefiltert).</param>
+    /// <param name="hiProQuelle">Der HI-Korb je Engine.</param>
+    /// <param name="lang">Zielsprache, in der Schreibweise der Kandidaten (Grossbuchstaben).</param>
+    /// <returns>Die HI-Kandidaten dieser Sprache, zuerst gefragte Engine zuerst.</returns>
+    public static List<SubtitleCandidate> HiPoolForLanguage(
+        IReadOnlyList<Configuration.SubtitleProvider> quellenReihenfolge,
+        IReadOnlyDictionary<Configuration.SubtitleProvider, List<SubtitleCandidate>> hiProQuelle,
+        string lang)
+    {
+        var seite = new List<SubtitleCandidate>();
+        if (quellenReihenfolge is null || hiProQuelle is null || string.IsNullOrEmpty(lang))
+        {
+            return seite;
+        }
+
+        foreach (var quelle in quellenReihenfolge)
+        {
+            if (!hiProQuelle.TryGetValue(quelle, out var korb) || korb is null)
+            {
+                continue;
+            }
+
+            foreach (var cand in korb)
+            {
+                if (string.Equals(cand.Language, lang, StringComparison.OrdinalIgnoreCase))
+                {
+                    seite.Add(cand);
+                }
+            }
+        }
+
+        return seite;
     }
 
     /// <summary>

@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.2.0.22.
+**Status:** Implementation — v12.2.0.23.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 34 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 35 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -3125,3 +3125,12 @@ Der Client bietet dafür `DownloadSeasonArchiveAsync(showId, season, language)` 
 - Ein ZIP-Eintrag trägt keine sid. Für ihn gibt es deshalb keinen „Report bad"-Weg: ein Formatbefund wird gezählt (`LastRejectedByFormat`) und der Eintrag fällt weg, gemeldet wird nichts — eine erfundene Nummer wäre schlimmer als kein Bericht.
 
 Geprüft in `tvsubtitles` (ein Abruf je Staffel und Sprache statt je Folge über einen zählenden Handler, Folge fehlt in der ZIP → Einzelweg greift, HI und Regular getrennt bis zu den Bytes, kaputte ZIP → kein Abbruch) und `endpoints` (Trennfunktion, Griff-Erkennung, Naht im Quelltext).
+
+**F-M664 [D]:** **Die Reihenfolge der Quellen ist die GUI; innerhalb von tvsubtitles.net sind es drei Stufen — Staffel-ZIP, Einzeleintrag, HI; und die HI-Seite jeder Engine bleibt ihre eigene.** Betreiber-Anweisung 21.11.2026: „Nein. Reihenfolge nach gui. Innerhalb von tvst erst staffelzip dann einzel, dann hi. Jede engine arbeitet fur sich"
+
+- Die ENGINES untereinander fragt weiter allein die Einstellung (`Configuration.DownloadOrder` → `DownloadQueryOrder`): die eingestellte Quelle zuerst, die übrigen in Enum-Reihenfolge, jede genau einmal. Daran ändert diese Regel nichts.
+- INNERHALB von tvst drei Stufen in dieser Reihenfolge: **(1)** Staffel-ZIP, reguläre Seite; **(2)** Einzeleintrag der Folgenseite, reguläre Seite — nur für das, was Stufe 1 nicht gedeckt hat; **(3)** HI. Die HI-Treffer aus ZIP und Folgenseite werden erst **nach** beiden regulären Stufen weitergegeben (`TvSubtitlesDownloadEndpoint.SearchAsync` sammelt sie in `hiTreffer` und hängt sie erst am Ende an); in der Antwort steht deshalb jede reguläre Zeile vor jeder HI-Zeile. Die Folgenseite wird nur gelesen, solange eine der beiden Seiten offen ist — deckt die ZIP beide, kostet die Folge keine Anfrage.
+- JEDE ENGINE ARBEITET FÜR SICH: die HI-Treffer liegen in einem Korb **je Quelle** (`hiProQuelle`), nicht in einem gemeinsamen Topf. Die HI-Seite einer Sprache entsteht über `DownloadPipeline.HiPoolForLanguage` — Engine für Engine in Frage-Reihenfolge, und ein Korb einer nicht gefragten Quelle steht gar nicht erst darin. Bis F-M663 kippten alle fremden HI-Listen in den Topf der Hauptsuche; damit konnte die eine Engine die HI-Seite der anderen füllen.
+- Unangetastet bleiben der frühe Ausstieg „regulärer Korb leer ⇒ nicht verfügbar" (F-M504) und die Rangfolge des HI-Pools (F-M474: Rang samt Preis und Breite vor dem Textscore). Geändert ist allein die Zusammensetzung der Liste, die dieser Pool liest: sie folgt jetzt der Engine-Reihenfolge. Der Walk sortiert stabil, bei Punktgleichheit entscheidet damit die zuerst gefragte Quelle — dieselbe Aussage, die die GUI trifft.
+
+Geprüft in `tvsubtitles` (deckt die ZIP die reguläre Seite, wird der Einzeleintrag der Folgenseite nicht gefragt; ZIP ohne HI-Fassung → HI kommt von der Folgenseite, deren regulärer Eintrag nicht übernommen wird; HI steht hinter jeder regulären Zeile; die Anfrage-Reihenfolge über einen mitschreibenden Handler; Folge außerhalb der ZIP weiter über die Folgenseite) und `endpoints` (Körbe getrennt als reine Funktion, HI-Seite in GUI-Reihenfolge, Naht im Quelltext beider Dateien).
