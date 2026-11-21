@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.23",
-        "changelog": "v12.2.0.23: the order is the GUI's, and inside tvsubtitles it is three stages — the season archive first, then the single entry of the episode page, then the hearing-impaired hits; each engine keeps its own HI set, so no source fills another's (F-M664).",
+        "version": "12.2.0.25",
+        "changelog": "v12.2.0.25: the two archive-cache settings stop claiming a source — the cache serves every engine, so the wrong \"SubDL only\" badge is gone and the page says only what the fields do (F-M665).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.23-dev/Jellyfin.Plugin.SubdlSync_12.2.0.23.zip",
-        "checksum": "c17319a4df25f9694d49b843d2658b99",
-        "timestamp": "2026-11-21T08:35:00Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.25-dev/Jellyfin.Plugin.SubdlSync_12.2.0.25.zip",
+        "checksum": "f74864354b5ec2dd23425716b528f05c",
+        "timestamp": "2026-11-21T09:09:14Z"
       }
     ]
   }
