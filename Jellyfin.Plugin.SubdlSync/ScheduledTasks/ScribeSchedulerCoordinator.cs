@@ -1314,6 +1314,33 @@ public sealed class ScribeSchedulerCoordinator : IDisposable
                 return;
             }
 
+            // F-M666 (operator order 21.11.2026, „Retetch zählt auch den Postprocessing mit"): a pending
+            // or running upload postprocessing holds the refetch back like a held run lock — same deferral,
+            // same deadline, same 16× budget, and the marker is NOT consumed, so the slot is picked up once
+            // the postprocessing is done. It sits BEFORE the lock test on purpose: while the postprocessing
+            // runs it is the lock holder, and "run holds the lock" then named the wrong cause.
+            var postprocessHold = AnchorJobGate.UploadPostprocessHold(
+                nowUtc,
+                GetUploadPostprocessDue(),
+                Pipeline.UploadPipeline.IsPostprocessingRunning,
+                config.IsUploadEnabled(SubtitleProvider.Subdl),
+                config.UploadPostprocessDelayMinutes);
+            if (postprocessHold is not null)
+            {
+                _refetchDeferredUntil = nowUtc.AddMinutes(JobSpacing(config));
+                _refetchFireWhy = postprocessHold;
+                _stateDirty = true;
+
+                if (TryCountReschedule("refetch", "postprocessing pending"))
+                {
+                    LogUtil.Normal(_logger,
+                        "[Sub Scribe] Refetch fire ({Anchor}) deferred — {Why}; retrying at {Retry:yyyy-MM-dd HH:mm} local (F-M666).",
+                        fire.AnchorDesc, postprocessHold, _refetchDeferredUntil.ToLocalTime());
+                }
+
+                return; // marker NOT set → the slot fires once the postprocessing is done
+            }
+
             if (!Pipeline.PipelineRunLock.IsFree(_logger))
             {
                 _refetchDeferredUntil = nowUtc.AddMinutes(JobSpacing(config));

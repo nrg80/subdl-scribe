@@ -168,6 +168,82 @@ internal static class Program
         Check(body.Contains("if (prune != DateTime.MinValue && nowUtc < prune)", StringComparison.Ordinal),
             "the database deadline specifically is gated");
 
+        // ── 5. The upload postprocessing holds the refetch (F-M666) ──────────────
+        // Operator order 21.11.2026, „Retetch zählt auch den Postprocessing mit": while an upload
+        // postprocessing is armed or running, the refetch fire is deferred — like a held run lock, with a
+        // reason a reader can act on. The decision is a pure function so it can be checked here without a
+        // server: `ScribeSchedulerCoordinator.CheckAndFire` returns at once when `Plugin.Instance` is null,
+        // and `Plugin.Instance` has a private setter, so the tick itself is not driveable from a test.
+        Console.WriteLine("5. Upload postprocessing holds the refetch (F-M666)");
+
+        var ppNow = new DateTime(2026, 11, 21, 12, 0, 0, DateTimeKind.Utc);
+        var ppDue = ppNow.AddMinutes(20);
+
+        var heldPending = AnchorJobGate.UploadPostprocessHold(ppNow, ppDue, false, true, 30);
+        Check(heldPending is not null, "an armed postprocessing moment ⇒ the refetch is HELD");
+        Check(heldPending is not null && heldPending.StartsWith("upload postprocessing pending until ", StringComparison.Ordinal),
+            "the reason names the postprocessing and the moment — " + (heldPending ?? "null"));
+        Check(heldPending is not null && heldPending.EndsWith(
+                ppDue.ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+                StringComparison.Ordinal),
+            "the moment in the reason is LOCAL time, the clock the operator reads");
+        Check(heldPending is not null && !heldPending.Contains("F-M", StringComparison.Ordinal)
+              && !heldPending.Contains('_'),
+            "the reason carries no requirement number and no code token (it is read without the code)");
+
+        Check(AnchorJobGate.UploadPostprocessHold(ppNow, ppNow, false, true, 30) is null,
+            "the armed moment has ARRIVED ⇒ no hold — the refetch fires (no waiting on a spent order)");
+        Check(AnchorJobGate.UploadPostprocessHold(ppNow, ppNow.AddMinutes(-30), false, true, 30) is null,
+            "an overdue armed moment ⇒ no hold either (the postprocessing block above had its turn)");
+
+        Check(AnchorJobGate.UploadPostprocessHold(ppNow, ppDue, false, true, 0) is null,
+            "UploadPostprocessDelayMinutes = 0 ⇒ no anchor and no hold (F-M445, refetch runs as today)");
+
+        var heldRunning = AnchorJobGate.UploadPostprocessHold(ppNow, null, true, true, 30);
+        Check(heldRunning == "upload postprocessing is running",
+            "a RUNNING postprocessing holds the refetch too — " + (heldRunning ?? "null"));
+        Check(AnchorJobGate.UploadPostprocessHold(ppNow, ppDue, true, true, 30) == "upload postprocessing is running",
+            "running outranks pending — the immediate truth wins the line");
+        Check(AnchorJobGate.UploadPostprocessHold(ppNow, null, true, true, 0) == "upload postprocessing is running",
+            "a manual postprocessing run holds it even with the delay at 0 — the run is real, not an anchor");
+
+        Check(AnchorJobGate.UploadPostprocessHold(ppNow, ppDue, false, false, 30) is null,
+            "upload switch OFF with a stale armed moment ⇒ NO hold (an order that can never fire must not block)");
+
+        // The wiring: the coordinator must not grow a second mechanism. It asks this gate, inside the
+        // refetch block, and does exactly what the lock test does — deadline, reason, budget, return.
+        Console.WriteLine("6. Refetch wiring (F-M666)");
+        var refetchStart = src.IndexOf("var effective = config.RefetchInterval;", StringComparison.Ordinal);
+        Check(refetchStart > 0, "the refetch block is present");
+        var refetchBlock = refetchStart > 0 ? src.Substring(refetchStart, Math.Min(12000, src.Length - refetchStart)) : string.Empty;
+
+        Check(refetchBlock.Contains("AnchorJobGate.UploadPostprocessHold(", StringComparison.Ordinal),
+            "the refetch asks the postprocessing gate");
+        Check(refetchBlock.Contains("Pipeline.UploadPipeline.IsPostprocessingRunning", StringComparison.Ordinal),
+            "the running state is read from the live flag, not guessed");
+        Check(refetchBlock.Contains("config.UploadPostprocessDelayMinutes", StringComparison.Ordinal),
+            "the configured delay is read there (0 = no anchor)");
+        Check(refetchBlock.Contains("_refetchFireWhy = postprocessHold;", StringComparison.Ordinal),
+            "the reason travels into _refetchFireWhy — the field GetCycleDeferral prints");
+        Check(src.Contains("return (when, _refetchFireWhy ?? \"retry scheduled\", versuche);", StringComparison.Ordinal),
+            "and GetCycleDeferral hands it to the page as the line's reason");
+
+        var holdAt = refetchBlock.IndexOf("AnchorJobGate.UploadPostprocessHold(", StringComparison.Ordinal);
+        var lockAt = refetchBlock.IndexOf("Pipeline.PipelineRunLock.IsFree(_logger)", StringComparison.Ordinal);
+        var markerAt = refetchBlock.IndexOf("_lastFiredMarker = fire.Marker;", StringComparison.Ordinal);
+        var spacingAt = refetchBlock.IndexOf("_refetchDeferredUntil = nowUtc.AddMinutes(JobSpacing(config));", StringComparison.Ordinal);
+        Check(holdAt > 0 && lockAt > holdAt,
+            "the postprocessing gate sits BEFORE the lock test — the running postprocessing IS the lock holder");
+        Check(holdAt > 0 && markerAt > holdAt,
+            "the hold returns BEFORE the marker is consumed — the slot stays claimable");
+        Check(spacingAt > holdAt && spacingAt < markerAt,
+            "the deferral uses the same UTC deadline as the lock-busy deferral (no second clock)");
+        Check(refetchBlock.Contains("TryCountReschedule(\"refetch\", \"postprocessing pending\")", StringComparison.Ordinal),
+            "it counts on the same 16× budget as the other refetch deferrals");
+        Check(refetchBlock.Contains("refetch", StringComparison.Ordinal)
+              && src.Contains("Refetch fire ({Anchor}) deferred — {Why}; retrying at {Retry:yyyy-MM-dd HH:mm} local (F-M666).", StringComparison.Ordinal),
+            "the log line names the cause in the operator's words and the retry moment in local time");
+
         Console.WriteLine();
         Console.WriteLine(Failures.Count == 0
             ? $"anchorgate: {_checks} checks, all green."

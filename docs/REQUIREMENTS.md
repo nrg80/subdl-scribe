@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.2.0.26.
+**Status:** Implementation — v12.2.0.27.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 36 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 37 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -3145,3 +3145,13 @@ Geprüft in `tvsubtitles` (deckt die ZIP die reguläre Seite, wird der Einzelein
 - DIE STUFENFOLGE AUS F-M664 BLEIBT UNVERÄNDERT: innerhalb tvsubtitles Staffel-ZIP (regulär) → Einzeleintrag (regulär) → HI, die Engines untereinander nach GUI, jede für sich. Der Cache ändert nur, WOHER die Bytes der ersten Stufe kommen.
 
 Geprüft in `tvsubtitles` (16 Prüfungen: Schlüssel und sein eigener Raum, Treffer im Platten-Cache ⇒ 0 Anfragen über einen zählenden Handler, leerer Cache ⇒ genau ein Abruf und die Datei liegt danach dort, zwei Läufe teilen die Datei, zwei Quellen mit gleicher Nummer kollidieren nicht, Frist und Größengrenze greifen für den Eintrag jeder Quelle, kaputte ZIP im Cache ⇒ die erste Stufe fällt aus ohne Abbruch, Naht im Quelltext).
+
+**F-M666 [D]:** **Der Refetch zählt das Upload-Postprocessing mit — solange ein Postprocessing-Termin offen oder ein Postprocessing am Laufen ist, verschiebt sich das Refetch-Feuer, genau wie bei einem belegten Lauf-Lock.** Betreiber-Anweisung 21.11.2026, wörtlich: „Retetch zählt auch den Postprocessing mit"; auf die Rückfrage nach der Richtung: „Wie immer. Jedweder Upload setzt den postprocessing anchor". Der Anker selbst bleibt unverändert (F-M445: jeder beendete Upload-Lauf setzt ihn auf Laufende plus `UploadPostprocessDelayMinutes`, Default 30, und der letzte Auftrag gewinnt) — neu ist allein, dass der Takt ihn mitzählt.
+
+- **Dieselbe Bauart wie der Lock, keine zweite Mechanik.** Die Entscheidung ist eine reine Funktion, `AnchorJobGate.UploadPostprocessHold(nowUtc, Termin, läuft, Upload an, Delay)`, und liefert den Grund oder `null`. Ist der Grund gesetzt, tut der Refetch-Block genau das, was er bei belegtem Lock tut: `_refetchDeferredUntil = now + JobSpacing`, `_refetchFireWhy` = Grund, `TryCountReschedule("refetch", …)` auf demselben 16×-Budget (F-M117/F-M368), Logzeile, `return`. Der Marker wird **nicht** verbraucht — der Slot bleibt nachholbar und feuert beim ersten Tick, an dem nichts mehr offen ist.
+- **Die Prüfung steht VOR dem Lock-Test.** Ein laufendes Postprocessing ist selbst der Lock-Halter; hinter dem Lock-Test hätte die Zeile „run holds the lock" gestanden und den falschen Verursacher genannt.
+- **Der Grund steht in Worten des Betreibers**, ohne Codekenntnis lesbar: `upload postprocessing pending until <Ortszeit>` bzw. `upload postprocessing is running` — im Log (`Refetch fire (<Anker>) deferred — <Grund>; retrying at <Ortszeit> local`) und in `_refetchFireWhy`, das `GetCycleDeferral` unverändert als Grund der Zeile „Next cycle … — <Grund> (attempt n/m)" ausgibt.
+- **Kein Aufschub, wenn der Anker nicht feuern kann oder schon dran war** — drei Fälle, jeder bewusst: Upload-Richtung **aus** (das Postprocessing läuft nur mit ihr, F-M291; ein liegengebliebener Termin darf den Refetch nicht für immer sperren), `UploadPostprocessDelayMinutes = 0` (inaktiv, es entsteht gar kein Anker, F-M445 — der Refetch läuft wie heute), und ein Termin, der **bereits fällig** ist (der Postprocessing-Block hatte in diesem Tick seinen Auftritt; auf einen verbrauchten Termin zu warten wäre eine Schleife). Ein **laufendes** Postprocessing hält auch bei Delay 0 — ein manuell gestarteter Lauf ist ein echter Lauf, kein Anker.
+- Unverändert bleiben: die Lock-Vertagung mit `AnchorJobGate.DeferralElapsed`, das 16×-Budget, die Marker-Regel und die F-M445-Ankerlogik selbst.
+
+Geprüft in `anchorgate` (22 Prüfungen: offener Anker hält den Refetch, Grund nennt Postprocessing und Ortszeit und trägt weder Anforderungsnummer noch Code-Token, fälliger und überfälliger Termin halten nicht, Delay 0 hält nicht, laufendes Postprocessing hält und hat Vorrang vor dem Anker, ausgeschaltete Upload-Richtung hält trotz liegendem Termin nicht; dazu die Naht im Quelltext: der Refetch fragt die Funktion, liest `IsPostprocessingRunning` und `UploadPostprocessDelayMinutes`, die Prüfung sitzt vor dem Lock-Test und vor dem Verbrauch des Markers, die Vertagung schreibt dieselbe UTC-Frist und dasselbe Budget, und die Logzeile ist gepinnt).

@@ -9,6 +9,7 @@
 // PURPOSE. See the GNU General Public License for more details.
 
 using System;
+using System.Globalization;
 
 namespace Jellyfin.Plugin.SubScribe.ScheduledTasks;
 
@@ -65,6 +66,54 @@ public static class AnchorJobGate
     /// <returns>True when the job may fire.</returns>
     public static bool DeferralElapsed(DateTime nowUtc, DateTime deferredUntil)
         => deferredUntil == DateTime.MinValue || nowUtc >= deferredUntil;
+
+    /// <summary>
+    /// F-M666 (operator order 21.11.2026, „Retetch zählt auch den Postprocessing mit"): the upload
+    /// postprocessing holds the refetch back like a held run lock — same deferral, same deadline, same
+    /// budget, and the slot stays claimable because the marker is not consumed.
+    /// <para>
+    /// It is a pure reason, not a second mechanism: the caller does with the string exactly what it does
+    /// with "run holds the lock". Three ways the answer can be "no hold", each of them deliberate:
+    /// the upload direction is off (nothing can fire the postprocessing, so an old moment must not block
+    /// the refetch for ever), the delay is 0 (the operator switched the postprocessing off — F-M445 — and
+    /// no anchor exists), and the armed moment has already arrived (the postprocessing block ran first in
+    /// this tick and either fired it or could not, in which case holding the refetch would be a loop).
+    /// </para>
+    /// </summary>
+    /// <param name="nowUtc">The current instant — moments are UTC.</param>
+    /// <param name="postprocessDueUtc">The armed postprocessing moment, or null when none is armed.</param>
+    /// <param name="postprocessingRunning">True while an upload postprocessing run is working.</param>
+    /// <param name="uploadEnabled">The upload direction of the source — the postprocessing only exists with it (F-M291).</param>
+    /// <param name="postprocessDelayMinutes">The configured delay; 0 means the postprocessing is inactive (F-M445).</param>
+    /// <returns>The reason for the status line and the log, or null when the refetch may fire.</returns>
+    public static string? UploadPostprocessHold(
+        DateTime nowUtc,
+        DateTime? postprocessDueUtc,
+        bool postprocessingRunning,
+        bool uploadEnabled,
+        int postprocessDelayMinutes)
+    {
+        // A running run is the immediate truth and outranks everything else: it also holds the run lock,
+        // so the refetch is deferred either way — but it should say WHY.
+        if (postprocessingRunning)
+        {
+            return "upload postprocessing is running";
+        }
+
+        if (!uploadEnabled || postprocessDelayMinutes <= 0)
+        {
+            return null;
+        }
+
+        if (postprocessDueUtc is not { } due || due <= nowUtc)
+        {
+            return null;
+        }
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(due, TimeZoneInfo.Local);
+        return "upload postprocessing pending until "
+               + local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// F-M368: deadlines are stored in UTC. A state file written before this change can carry a LOCAL
