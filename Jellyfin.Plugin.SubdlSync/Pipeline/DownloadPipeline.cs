@@ -527,7 +527,12 @@ public sealed class DownloadPipeline : IDisposable
         // F-M507: die dritte Quelle (moviesubtitles.org) ist dabei — als DOWNLOAD-Endpunkt. Einen
         // Upload-Endpunkt hat sie nicht, und deshalb steht sie auch nicht in der Upload-Liste des
         // Katalogs (SubtitleEndpointCatalog.HasUploadPath).
-        _tvClient = new Api.TvSubtitlesClient(ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
+        // F-M665: jeder Client bekommt DENSELBEN Archiv-Cache des Laufs (F-M370) — eine Ablage, eine
+        // Frist, eine Groessengrenze; welche Quelle eine Datei geliefert hat, steht im Schluesselraum
+        // je Quelle. Konfiguriert und getrimmt wird er weiter unten (RunAsync) vor der ersten Anfrage;
+        // die Instanz ist dieselbe.
+        _tvClient = new Api.TvSubtitlesClient(
+            ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)), _api.ArchiveDiskCache);
         var tvClient = _tvClient;
         _msubClient = new Api.MovieSubtitlesClient(ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)));
         _msubMovies = new Api.Endpoints.MsubMovieResolver(_msubClient, _logger);

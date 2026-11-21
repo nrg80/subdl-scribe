@@ -387,6 +387,13 @@ public sealed class TvSubtitlesClient
     private readonly HttpClient _http;
 
     /// <summary>
+    /// F-M665: der Archiv-Cache des Laufs, oder <c>null</c> (dann nur Merker). Es ist DIESELBE Instanz,
+    /// die auch jede andere Engine benutzt — der Cache trennt die Quellen ueber den Schluessel,
+    /// nicht ueber das Verzeichnis.
+    /// </summary>
+    private readonly ArchiveDiskCache? _archives;
+
+    /// <summary>
     /// F-M521: the debug channel for this site. Two lines per request ("API call", "API response"),
     /// Debug only — the same shape SubDL has always used. Both directions go through it, because
     /// searching, fetching and uploading share the same three HTTP call sites.
@@ -438,8 +445,28 @@ public sealed class TvSubtitlesClient
     /// <param name="http">The HttpClient to use. <see cref="ScribeApiClient.NewHttpClient"/> gives one
     /// that identifies itself as this plugin; a caller may pass its own for a test.</param>
     public TvSubtitlesClient(HttpClient http)
+        : this(http, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="TvSubtitlesClient"/> class with the run's archive
+    /// cache (F-M665).
+    /// <para>
+    /// Der Cache ist der BESTEHENDE (<see cref="ArchiveDiskCache"/>, F-M370) und er gehoert keiner
+    /// Quelle: eine Ablage, eine Frist, eine Groessengrenze, die zwei vorhandenen GUI-Felder. Jede
+    /// Engine bekommt dieselbe Instanz; welche Quelle eine Datei geliefert hat, steht im Schluessel
+    /// (<see cref="ArchiveKey.ForTvstSeason"/>). Ein Client ohne Cache verhaelt sich wie vorher:
+    /// die Staffel-ZIP lebt dann nur im Merker des Laufs.
+    /// </para>
+    /// </summary>
+    /// <param name="http">The HttpClient to use.</param>
+    /// <param name="archiveCache">The run's disk cache, or <c>null</c> to keep the season archive in
+    /// memory only.</param>
+    public TvSubtitlesClient(HttpClient http, ArchiveDiskCache? archiveCache)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
+        _archives = archiveCache;
         if (_http.DefaultRequestHeaders.UserAgent.Count == 0)
         {
             _http.DefaultRequestHeaders.UserAgent.ParseAdd(
@@ -1295,6 +1322,15 @@ public sealed class TvSubtitlesClient
     /// Merker (<see cref="_seasonPacks"/>). Leer, wenn die Seite keine ZIP fuer diese Sprache traegt
     /// oder sie nicht lesbar ist; der Grund steht dann in <see cref="LastSeasonPackError"/>.
     /// <para>
+    /// F-M665 (Bediener-Entscheidung 21.11.2026): vor dem Merker steht der Archiv-Cache. Die ZIP liegt
+    /// in <see cref="ArchiveDiskCache"/> — der Ablage, die jede Engine benutzt —, unter eigenem
+    /// Schluesselraum je Quelle (<see cref="ArchiveKey.ForTvstSeason"/>) und unter der Frist und der
+    /// Groessengrenze, die fuer die ganze Ablage gelten. Ein Treffer wird gelesen, nicht geholt: ein
+    /// Lauf, der die Staffel schon bezahlt hat, zahlt sie im naechsten nicht wieder. Ein Fehlschlag
+    /// landet NICHT auf der Platte — er wird nur im Merker gemerkt, damit ein kaputter Abruf den
+    /// naechsten Lauf nicht blockiert.
+    /// </para>
+    /// <para>
     /// Es wird NICHTS geworfen ausser einem echten Abbruch: Stufe 1 ist eine Abkuerzung, kein Muss —
     /// faellt sie aus, laeuft der Einzelweg der Folgenseite weiter.
     /// </para>
@@ -1319,9 +1355,31 @@ public sealed class TvSubtitlesClient
 
         IReadOnlyList<TvSubtitlesPackFile> files = Array.Empty<TvSubtitlesPackFile>();
         string? fehler = null;
+
+        // F-M665: eigener Schluesselraum je Quelle, gebildet aus dem, was den Abruf bestimmt — Serie,
+        // Staffel, Sprache. Welche Quelle geliefert hat, steht im Praefix, nicht im Verzeichnis.
+        string? schluessel = ArchiveKey.ForTvstSeason(showId, season, lang);
         try
         {
-            var zip = await DownloadSeasonArchiveAsync(showId, season, lang, cancellationToken).ConfigureAwait(false);
+            byte[]? zip;
+            if (_archives is not null
+                && _archives.TryGet(schluessel, out byte[]? gespeichert)
+                && gespeichert is { Length: > 0 })
+            {
+                // Treffer: die Bytes kommen von der Platte, es geht KEINE Anfrage raus.
+                zip = gespeichert;
+            }
+            else
+            {
+                zip = await DownloadSeasonArchiveAsync(showId, season, lang, cancellationToken).ConfigureAwait(false);
+
+                // Nur ein gelungener Abruf wird abgelegt. Ein Fehlschlag bleibt im Merker (unten).
+                if (zip is not null)
+                {
+                    _archives?.Put(schluessel, zip);
+                }
+            }
+
             if (zip is null)
             {
                 fehler = "die Staffelseite trug keine ZIP fuer " + lang;

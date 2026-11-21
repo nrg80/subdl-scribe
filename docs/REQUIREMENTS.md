@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.2.0.23.
+**Status:** Implementation — v12.2.0.24.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 35 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 36 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -3134,3 +3134,14 @@ Geprüft in `tvsubtitles` (ein Abruf je Staffel und Sprache statt je Folge über
 - Unangetastet bleiben der frühe Ausstieg „regulärer Korb leer ⇒ nicht verfügbar" (F-M504) und die Rangfolge des HI-Pools (F-M474: Rang samt Preis und Breite vor dem Textscore). Geändert ist allein die Zusammensetzung der Liste, die dieser Pool liest: sie folgt jetzt der Engine-Reihenfolge. Der Walk sortiert stabil, bei Punktgleichheit entscheidet damit die zuerst gefragte Quelle — dieselbe Aussage, die die GUI trifft.
 
 Geprüft in `tvsubtitles` (deckt die ZIP die reguläre Seite, wird der Einzeleintrag der Folgenseite nicht gefragt; ZIP ohne HI-Fassung → HI kommt von der Folgenseite, deren regulärer Eintrag nicht übernommen wird; HI steht hinter jeder regulären Zeile; die Anfrage-Reihenfolge über einen mitschreibenden Handler; Folge außerhalb der ZIP weiter über die Folgenseite) und `endpoints` (Körbe getrennt als reine Funktion, HI-Seite in GUI-Reihenfolge, Naht im Quelltext beider Dateien).
+
+**F-M665 [D]:** **Der Archiv-Cache gilt für JEDE Engine — welche Quelle eine Datei geliefert hat, steht im Schlüsselraum, nicht in der Ablage.** Betreiber-Entscheidung 21.11.2026 („bevorzugt staffelpacks von tvst und die dann auch cachen"), am selben Tag bestätigt und nachgeschärft: derselbe Cache für alle Quellen, je Quelle ein eigener Schlüssel, dieselben zwei Felder für Frist und Größe, jede Engine arbeitet für sich.
+
+- EIN CACHE, KEIN ZWEITER (F-M370): `ArchiveDiskCache`, Verzeichnis `<Datenordner>/archive-cache`. **Frist und Größe sind Eigenschaften der Ablage, nicht einer Quelle** — sie gelten für alles, was darin liegt: `Configuration.DownloadArchiveCacheDays` (Default 7), `DownloadArchiveCacheMaxMb` (Default 256), ältestes zuerst raus, ein Treffer setzt die Uhr zurück. Es gibt keine Frist je Quelle und keine Obergrenze je Quelle, sondern eine Ablage mit einer Uhr und einer Decke. Der Lauf baut jeden Client mit derselben Instanz, die er konfiguriert und trimmt; die Trennung der Quellen passiert im SCHLÜSSEL, nicht im Verzeichnis. **Es gibt keine neuen Einstellungen und keine neuen Felder** — die beiden vorhandenen genügen für jede Engine, und `configPage.html` bleibt unangetastet; was der Cache tut, steht hier.
+- WELCHE QUELLE, STEHT IM SCHLÜSSEL: `<Quelle>.<…>`, für tvsubtitles `tvst.<Serie>.<Staffel>.<Sprache>` — z. B. `tvst.3234.2.en` (`ArchiveKey.ForTvstSeason`). Damit kann keine Engine die Datei einer anderen lesen oder überschreiben, und zwar nicht bloß unwahrscheinlich, sondern **unmöglich**: der bestehende Schlüsselraum lässt nur Buchstaben, Ziffern, `_` und `-` zu (`ArchiveKey.FromUrl`), hier steht ein Punkt; eine Adresse wie `…/subtitle/tvst.3234.2.en.zip` ergibt dort gar keinen Schlüssel. Die Schlüssel der bereits bedienten Quelle bleiben unverändert — es wird nichts umbenannt, was schon auf der Platte liegt.
+- PUNKT UND KEIN DOPPELPUNKT: der Cache legt seine Dateien unter `key + ".zip"` ab, und ein Doppelpunkt ist auf Windows kein zulässiger Dateiname — dort fiele die Staffel still aus dem Cache, ohne dass irgendwo etwas rot würde.
+- LESEN VOR HOLEN, für jede Engine: der Cache wird VOR dem Netz gefragt. Für tvsubtitles heißt das: `TvSubtitlesClient.SeasonPackAsync` liest zuerst die Platte; ein Treffer geht durch `ReadSeasonArchive`, kostet **keine** HTTP-Anfrage und setzt `LastSeasonPackError` auf `null`. Nur ein Fehlschlag geht ins Netz, und nur ein gelungener Abruf wird geschrieben, bevor er zurückgegeben wird.
+- EIN FEHLSCHLAG KOMMT NICHT AUF DIE PLATTE. Er wird wie bisher nur im Merker des Laufs gemerkt (leere Liste plus Grund, F-M663), damit ein kaputter Abruf den nächsten Lauf nicht blockiert. Eine bereits gespeicherte ZIP, die sich nicht lesen lässt, fällt wie jede kaputte ZIP aus: die erste Stufe trägt nichts, der Grund steht in `LastSeasonPackError`, der Einzeleintrag läuft weiter — nichts bricht ab.
+- DIE STUFENFOLGE AUS F-M664 BLEIBT UNVERÄNDERT: innerhalb tvsubtitles Staffel-ZIP (regulär) → Einzeleintrag (regulär) → HI, die Engines untereinander nach GUI, jede für sich. Der Cache ändert nur, WOHER die Bytes der ersten Stufe kommen.
+
+Geprüft in `tvsubtitles` (16 Prüfungen: Schlüssel und sein eigener Raum, Treffer im Platten-Cache ⇒ 0 Anfragen über einen zählenden Handler, leerer Cache ⇒ genau ein Abruf und die Datei liegt danach dort, zwei Läufe teilen die Datei, zwei Quellen mit gleicher Nummer kollidieren nicht, Frist und Größengrenze greifen für den Eintrag jeder Quelle, kaputte ZIP im Cache ⇒ die erste Stufe fällt aus ohne Abbruch, Naht im Quelltext).

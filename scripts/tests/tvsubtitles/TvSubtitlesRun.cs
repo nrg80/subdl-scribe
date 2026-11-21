@@ -1032,6 +1032,143 @@ internal static class Program
             "regular=" + string.Join(",", stufe3Seiten.Regular.Select(c => c.Url))
             + " hi=" + string.Join(",", stufe3Seiten.HearingImpaired.Select(c => c.Url)));
 
+        // --- F-M665: die Staffel-ZIP liegt im gemeinsamen Archiv-Cache, der JEDER Engine dient ---------
+        // Betreiber-Entscheidung 21.11.2026: „bevorzugt staffelpacks von tvst und die dann auch cachen",
+        // heute bestaetigt: derselbe Cache fuer alle Quellen, eigener Schluesselraum je Quelle, dieselben
+        // zwei GUI-Felder fuer Frist und Groesse als Eigenschaft der Ablage, jede Engine fuer sich.
+        string fm665Basis = Path.Combine(Path.GetTempPath(), "tvst-pack-" + Guid.NewGuid().ToString("N")[..8]);
+        static string ImArchiveCache(string d) => Path.Combine(d, "archive-cache");
+
+        Check("F-M665: der Schluessel nennt die Quelle, die Serie, die Staffel und die Sprache",
+            ArchiveKey.ForTvstSeason(3234, 2, "EN") == "tvst.3234.2.en",
+            ArchiveKey.ForTvstSeason(3234, 2, "EN") ?? "null");
+        Check("F-M665: ohne Serie, Staffel oder Sprache gibt es keinen Schluessel — nichts wird geraten",
+            ArchiveKey.ForTvstSeason(0, 2, "en") is null
+            && ArchiveKey.ForTvstSeason(3234, 0, "en") is null
+            && ArchiveKey.ForTvstSeason(3234, 2, string.Empty) is null
+            && ArchiveKey.ForTvstSeason(3234, 2, "en/us") is null);
+        Check("F-M665: kein Schluessel der anderen Quelle kann je so aussehen wie ein tvst-Schluessel",
+            ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/tvst.3234.2.en.zip") is null
+            && ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/3234.zip") == "3234",
+            "der Punkt steht nicht im SubDL-Alphabet (Buchstaben, Ziffern, _ und -)");
+
+        // Ein leerer Cache: genau EIN Abruf, danach liegt die ZIP auf der Platte.
+        var fm665Cache = new ArchiveDiskCache();
+        fm665Cache.Configure(fm665Basis, 7, 256);
+        Check("F-M665: die zwei BESTEHENDEN GUI-Felder — 7 Tage und 256 MB fuer die ganze Ablage schalten ein",
+            fm665Cache.Enabled, fm665Cache.DirectoryPath ?? "aus");
+
+        var fm665Handler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 2) };
+        var fm665Client = new TvSubtitlesClient(new HttpClient(fm665Handler), fm665Cache);
+        var fm665Erst = await fm665Client.SeasonPackAsync(3234, 2, "en").ConfigureAwait(false);
+        string fm665Datei = Path.Combine(ImArchiveCache(fm665Basis), "tvst.3234.2.en.zip");
+        Check("F-M665: ein leerer Cache holt die Staffel-ZIP genau EINMAL",
+            fm665Erst.Count == 4 && fm665Handler.SeasonPages == 1 && fm665Handler.DownloadPages == 1,
+            "Eintraege " + fm665Erst.Count + ", Staffelseiten " + fm665Handler.SeasonPages
+            + ", ZIP-Abrufe " + fm665Handler.DownloadPages);
+        Check("F-M665: der Abruf liegt danach als Datei im Platten-Cache", File.Exists(fm665Datei), fm665Datei);
+
+        var fm665Zweit = await fm665Client.SeasonPackAsync(3234, 2, "en").ConfigureAwait(false);
+        Check("F-M665: derselbe Lauf fragt nicht zweimal — der Merker traegt die zweite Folge",
+            fm665Zweit.Count == 4 && fm665Handler.Requests == 2,
+            "Anfragen " + fm665Handler.Requests);
+
+        // Der NAECHSTE Lauf: neuer Client, neue Cache-Instanz, dasselbe Verzeichnis, ein Handler, der
+        // jede Anfrage zaehlt — die ZIP darf ihn gar nicht erst erreichen.
+        var fm665NaechsterLauf = new ArchiveDiskCache();
+        fm665NaechsterLauf.Configure(fm665Basis, 7, 256);
+        var fm665ZweitHandler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 2) };
+        var fm665ZweitClient = new TvSubtitlesClient(new HttpClient(fm665ZweitHandler), fm665NaechsterLauf);
+        var fm665Platte = await fm665ZweitClient.SeasonPackAsync(3234, 2, "en").ConfigureAwait(false);
+        Check("F-M665: der naechste Lauf liest die Staffel-ZIP von der Platte — 0 Anfragen",
+            fm665ZweitHandler.Requests == 0 && fm665Platte.Count == 4
+            && fm665Platte[0].Data.SequenceEqual(fm665Erst[0].Data),
+            "Anfragen " + fm665ZweitHandler.Requests + ", Eintraege " + fm665Platte.Count);
+        Check("F-M665: der Treffer meldet keinen Grund — gelesen ist gelesen",
+            fm665ZweitClient.LastSeasonPackError is null,
+            fm665ZweitClient.LastSeasonPackError ?? "null");
+
+        // Quelle getrennt: dasselbe Archivnummer-Paar (3234) in beiden Raeumen, zwei Bodies.
+        var fm665Subdl = ZipOf(("SubDL - 2x01.en.srt", "1\n00:00:01,000 --> 00:00:02,000\nSUBDL\n"));
+        fm665Cache.Put(ArchiveKey.FromUrl("https://dl.subdl.com/subtitle/3234.zip"), fm665Subdl);
+        byte[] fm665TvstAufPlatte = await File.ReadAllBytesAsync(fm665Datei).ConfigureAwait(false);
+        Check("F-M665: zwei Quellen mit gleicher Nummer kollidieren nicht — der Raum steht im Schluessel",
+            File.Exists(Path.Combine(ImArchiveCache(fm665Basis), "3234.zip"))
+            && File.Exists(fm665Datei)
+            && !fm665TvstAufPlatte.SequenceEqual(fm665Subdl),
+            "3234.zip und tvst.3234.2.en.zip liegen nebeneinander");
+        bool fm665SubdlGelesen = fm665NaechsterLauf.TryGet("3234", out byte[]? fm665SubdlZurueck);
+        bool fm665TvstGelesen = fm665NaechsterLauf.TryGet(
+            ArchiveKey.ForTvstSeason(3234, 2, "en"), out byte[]? fm665TvstZurueck);
+        Check("F-M665: beide Schluesselraeume lesen ihre EIGENEN Bytes zurueck",
+            fm665SubdlGelesen && fm665SubdlZurueck!.SequenceEqual(fm665Subdl)
+            && fm665TvstGelesen && fm665TvstZurueck!.Length == fm665TvstAufPlatte.Length,
+            "SubDL " + (fm665SubdlZurueck?.Length ?? 0) + " B, tvst " + (fm665TvstZurueck?.Length ?? 0) + " B");
+
+        // Frist: eine ZIP aelter als DownloadArchiveCacheDays ist kein Treffer mehr — sie wird geholt.
+        File.SetLastWriteTimeUtc(fm665Datei, DateTime.UtcNow.AddDays(-20));
+        var fm665AltHandler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 3) };
+        var fm665AltClient = new TvSubtitlesClient(new HttpClient(fm665AltHandler), fm665NaechsterLauf);
+        var fm665Frisch = await fm665AltClient.SeasonPackAsync(3234, 2, "en").ConfigureAwait(false);
+        Check("F-M665: eine ZIP aelter als die Frist wird nicht mehr benutzt — sie wird neu geholt",
+            fm665AltHandler.DownloadPages == 1 && fm665Frisch.Count == 6,
+            "ZIP-Abrufe " + fm665AltHandler.DownloadPages + ", Eintraege " + fm665Frisch.Count);
+
+        // Groesse: ueber DownloadArchiveCacheMaxMb fliegt das Aelteste raus — eine Decke fuer die Ablage.
+        string fm665KleinDir = fm665Basis + "-klein";
+        var fm665Klein = new ArchiveDiskCache();
+        fm665Klein.Configure(fm665KleinDir, 7, 1);
+        string fm665Alt = Path.Combine(ImArchiveCache(fm665KleinDir), "tvst.11.1.en.zip");
+        string fm665Neu = Path.Combine(ImArchiveCache(fm665KleinDir), "tvst.11.2.en.zip");
+        fm665Klein.Put(ArchiveKey.ForTvstSeason(11, 1, "en"), PkZip(700 * 1024));
+        File.SetLastWriteTimeUtc(fm665Alt, DateTime.UtcNow.AddMinutes(-20));
+        fm665Klein.Put(ArchiveKey.ForTvstSeason(11, 2, "en"), PkZip(700 * 1024));
+        File.SetLastWriteTimeUtc(fm665Neu, DateTime.UtcNow.AddMinutes(-5));
+        bool fm665VorTrim = File.Exists(fm665Alt) && File.Exists(fm665Neu);
+        fm665Klein.Trim();
+        Check("F-M665: ueber DownloadArchiveCacheMaxMb fliegt das Aelteste raus — auch ein tvst-Eintrag",
+            fm665VorTrim && !File.Exists(fm665Alt) && File.Exists(fm665Neu)
+            && fm665Klein.SizeBytes() <= 1024L * 1024L,
+            "vor dem Trim 1,4 MB in 1 MB, danach " + fm665Klein.SizeBytes() + " B");
+
+        // Kaputte ZIP im Cache: Stufe 1 faellt aus, der Einzelweg traegt die Folge, nichts bricht ab.
+        var fm665KaputtCache = new ArchiveDiskCache();
+        fm665KaputtCache.Configure(fm665Basis + "-kaputt", 7, 256);
+        fm665KaputtCache.Put(ArchiveKey.ForTvstSeason(3234, 2, "en"), PkZip(128));
+        var fm665KaputtHandler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 5), EpisodesOnPages = { 1 } };
+        var fm665KaputtClient = new TvSubtitlesClient(new HttpClient(fm665KaputtHandler), fm665KaputtCache);
+        var fm665KaputtEndpoint = new TvSubtitlesDownloadEndpoint(fm665KaputtClient);
+        var fm665KaputtHits = await fm665KaputtEndpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 1, "en")).ConfigureAwait(false);
+        Check("F-M665: eine kaputte ZIP im Cache faellt als Stufe 1 aus — der Einzelweg traegt die Folge, nichts bricht ab",
+            fm665KaputtHits.Count > 0
+            && fm665KaputtHits.All(h => !h.Id.StartsWith("seasonpack:", StringComparison.Ordinal))
+            && !string.IsNullOrEmpty(fm665KaputtClient.LastSeasonPackError),
+            "Treffer=" + string.Join(",", fm665KaputtHits.Select(h => h.Id))
+            + " Grund=\"" + (fm665KaputtClient.LastSeasonPackError ?? "—") + "\"");
+
+        // Naht im Quelltext: der Lauf gibt dem Client DENSELBEN Cache, und gelesen wird VOR dem Abruf.
+        Check("F-M665: der Lauf gibt jedem Client denselben Archiv-Cache — eine Ablage, kein Topf je Quelle",
+            dlQuelle.Contains("ScribeApiClient.NewHttpClient(TimeSpan.FromSeconds(90)), _api.ArchiveDiskCache", StringComparison.Ordinal),
+            "DownloadPipeline baut den Client mit _api.ArchiveDiskCache");
+        Check("F-M665: die Platte wird VOR dem Abruf gefragt, geschrieben wird nur ein Treffer",
+            tvstClient.IndexOf("_archives.TryGet(schluessel", StringComparison.Ordinal)
+                < tvstClient.IndexOf("DownloadSeasonArchiveAsync(showId, season, lang, cancellationToken)", StringComparison.Ordinal)
+            && tvstClient.Contains("_archives?.Put(schluessel, zip)", StringComparison.Ordinal),
+            "TryGet steht vor DownloadSeasonArchiveAsync, Put hinter dem Abruf");
+
+        try
+        {
+            foreach (var d in Directory.GetDirectories(Path.GetTempPath(), Path.GetFileName(fm665Basis) + "*"))
+            {
+                Directory.Delete(d, recursive: true);
+            }
+        }
+        catch (Exception)
+        {
+            // Ein liegengebliebenes Testverzeichnis darf die Suite nicht entscheiden.
+        }
+
         if (_failures > 0)
         {
 
@@ -1073,6 +1210,16 @@ internal static class Program
 
         return buffer.ToArray();
     }
+
+    /// <summary>
+    /// F-M665: ein Rumpf, der die ZIP-Signatur traegt und sonst Muell ist — so nimmt ihn der Cache an
+    /// (er prueft nur <c>PK</c>) und die Leseprobe scheitert erst beim Entpacken. Genau der Fall
+    /// „kaputte Datei auf der Platte", ohne eine halbe Datei schreiben zu muessen.
+    /// </summary>
+    /// <param name="payloadBytes">Fuellbytes hinter der Signatur.</param>
+    /// <returns>Die Bytes.</returns>
+    private static byte[] PkZip(int payloadBytes) =>
+        new byte[] { 0x50, 0x4B, 3, 4 }.Concat(Enumerable.Repeat((byte)0x41, payloadBytes)).ToArray();
 
     /// <summary>
     /// F-M663: eine Staffel, wie die Seite sie fuehrt — Serienliste, Staffelseite mit dem ZIP-Link, die

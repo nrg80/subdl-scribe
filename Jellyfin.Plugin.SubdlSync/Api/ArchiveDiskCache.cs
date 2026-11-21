@@ -8,6 +8,12 @@ namespace Jellyfin.Plugin.SubScribe.Api;
 /// <summary>
 /// F-M370: archives kept on disk between runs, keyed by <see cref="ArchiveKey"/>.
 /// <para>
+/// F-M665: dieser Cache gehoert keiner Quelle. Jede Engine legt ihre Archive hier ab; welche Quelle
+/// eine Datei geliefert hat, steht im Schluesselraum (<see cref="ArchiveKey.ForTvstSeason"/> fuer die
+/// Staffel-ZIP), nicht im Verzeichnis. Frist und Groessengrenze gelten deshalb fuer alles, was in der
+/// Ablage liegt — sie sind Eigenschaften des Caches, nicht einer Quelle.
+/// </para>
+/// <para>
 /// The run cache (F-M369) only helps inside one run — but a season pack serves one episode per
 /// run, and with the free daily limit at 50 downloads a season needs several days. Measured on
 /// 01.11.2026: 51 archive fetches for 45 files, 26 of them on three packs; the run stopped at

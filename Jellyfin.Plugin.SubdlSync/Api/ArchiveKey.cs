@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace Jellyfin.Plugin.SubScribe.Api;
 
@@ -90,6 +91,53 @@ public static class ArchiveKey
     /// <param name="fullUrl">Absolute download URL.</param>
     /// <returns>Whether a key exists.</returns>
     public static bool IsCacheable(string? fullUrl) => FromUrl(fullUrl) != null;
+
+    /// <summary>
+    /// F-M665 (Bediener-Entscheidung 21.11.2026: „bevorzugt staffelpacks von tvst und die dann auch
+    /// cachen"): der Schluessel einer Staffel-ZIP im gemeinsamen Archiv-Cache.
+    /// <para>
+    /// Der Cache gehoert keiner Quelle — welche Quelle eine Datei geliefert hat, steht im Schluessel.
+    /// Eigener Raum je Quelle, und zwar so, dass eine Kollision nicht bloss unwahrscheinlich, sondern
+    /// unmoeglich ist: <see cref="FromUrl"/> laesst nur Buchstaben, Ziffern, <c>_</c> und <c>-</c> zu,
+    /// hier steht ein <b>Punkt</b>. Kein Schluessel der anderen Quelle kann also je so aussehen, und
+    /// ein Archiv mit gleichem Namen oder gleicher Id landet unter einem anderen Namen.
+    /// </para>
+    /// <para>
+    /// Warum ein Punkt und kein Doppelpunkt: der Cache legt seine Dateien unter <c>key + ".zip"</c> ab.
+    /// Ein Doppelpunkt ist auf Windows kein zulaessiger Dateiname — dort fiele die tvst-Staffel still
+    /// aus dem Cache, ohne dass irgendwo etwas rot wuerde.
+    /// </para>
+    /// </summary>
+    /// <param name="showId">The site's show id (<c>tvshow-&lt;id&gt;.html</c>).</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">The site's language code, e.g. <c>en</c>.</param>
+    /// <returns>The key, or <c>null</c> when the triple does not name a cacheable archive.</returns>
+    public static string? ForTvstSeason(int showId, int season, string? language)
+    {
+        if (showId <= 0 || season <= 0)
+        {
+            return null;
+        }
+
+        string lang = (language ?? string.Empty).Trim().ToLowerInvariant();
+        if (lang.Length is < 2 or > 3)
+        {
+            return null;
+        }
+
+        foreach (char c in lang)
+        {
+            if (!char.IsAsciiLetterOrDigit(c))
+            {
+                return null;
+            }
+        }
+
+        return "tvst."
+            + showId.ToString(CultureInfo.InvariantCulture) + "."
+            + season.ToString(CultureInfo.InvariantCulture) + "."
+            + lang;
+    }
 
     private static bool IsUsable(string segment)
     {

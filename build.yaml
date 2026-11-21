@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.2.0.23"
+version: "12.2.0.24"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.2.0.24: the archive cache now serves every engine — a season archive is read from disk before the net, each source keeps its own key space in the one cache, retention and size stay the cache's own two fields, and only a successful fetch is written (F-M665).
   v12.2.0.23: the order is the GUI's, and inside tvsubtitles it is three stages — the season archive first, then the single entry of the episode page, then the hearing-impaired hits; each engine keeps its own HI set, so no source fills another's (F-M664).
   v12.2.0.22: the download page takes tvsubtitles' season archive as stage 1 — one fetch per series, season and language instead of one per episode, with the regular and the hearing-impaired file kept apart; the single-episode page still carries whatever the archive lacks (F-M663).
   v12.2.0.21: an empty search answer now buys a longer clock — a title no source carries is not asked again at every run, and any search that returns something clears the mark (F-M661).
