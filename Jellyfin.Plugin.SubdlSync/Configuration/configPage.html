@@ -318,12 +318,12 @@
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheDays">Archive cache — days on disk</label>
                             <input id="DownloadArchiveCacheDays" name="DownloadArchiveCacheDays" type="number" is="emby-input" min="0" max="365" />
-                            <div class="fieldDescription">Keeps a downloaded subtitle pack on disk for this many days and reuses it. <strong>0 = off.</strong> Default: 14.</div>
+                            <div class="fieldDescription">Keeps a downloaded subtitle pack on disk for this many days and reuses it. <strong>0 = off.</strong> Default: 7.</div>
                         </div>
                         <div class="inputContainer">
                             <label class="inputLabel inputLabelUnfocused" for="DownloadArchiveCacheMaxMb">Archive cache — ceiling (MB)</label>
                             <input id="DownloadArchiveCacheMaxMb" name="DownloadArchiveCacheMaxMb" type="number" is="emby-input" min="0" max="10240" />
-                            <div class="fieldDescription">Size ceiling for the archive cache; the oldest archives are dropped first. <strong>0 = off.</strong> Default: 512.</div>
+                            <div class="fieldDescription">Size ceiling for the archive cache; the oldest archives are dropped first. <strong>0 = off.</strong> Default: 256.</div>
                         </div>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -593,7 +593,7 @@
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
                                 <input id="DownloadHearingImpaired" name="DownloadHearingImpaired" type="checkbox" is="emby-checkbox" />
-                                <span>Also download hearing impaired version (if available) <span class="src-badge src-subdl" title="Only this source is affected — tvst does not have this">SubDL only</span></span>
+                                <span>Also download hearing impaired version (if available)</span>
                             </label>
                             <div class="fieldDescription">Also save the SDH variant as separate file. Default: off.</div>
                         </div>

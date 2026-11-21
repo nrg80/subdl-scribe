@@ -1927,8 +1927,11 @@ def main():
     # F-M665 (Operator 21.11.2026: „die tvst-Staffel-ZIP in denselben Platten-Cache … source
     # unabhängig"): die zwei Archiv-Cache-Felder tragen KEINEN Quellenmerker mehr — der Cache dient
     # jeder Engine, die Quelle steckt im Schlüsselraum (tvst.<Serie>.<Staffel>.<Sprache>).
+    # F-M664 (Operator 21.11.2026): auch der HI-Schalter ist nicht mehr SubDL-only — mit der
+    # Ohr-Marke der Eintragsseite und dem .HI.-Marker der Staffel-ZIP liefert tvst HI-Fassungen
+    # ebenso. Bleiben drei Merker: die zwei Tageslimit-Schalter und der AI-Schalter.
     subdl_only = ("UploadContinueAfterLimit", "DownloadContinueAfterLimit",
-                  "DownloadHearingImpaired", "AllowAiTranslatedSubs")
+                  "AllowAiTranslatedSubs")
     for cid in subdl_only:
         # Der Merker steht mal hinter dem Kaestchen (Checkbox), mal im Label DAVOR (Zahlenfeld) —
         # gesucht wird deshalb in einem Fenster um das Control, nicht nur dahinter.
@@ -1947,7 +1950,7 @@ def main():
           '</span> <span class="src-badge' not in page_src,
           "%d kaputte Ketten" % page_src.count('</span> <span class="src-badge'))
     for cid in ("UploadContinueAfterLimit", "DownloadContinueAfterLimit",
-                "DownloadHearingImpaired", "AllowAiTranslatedSubs"):
+                "AllowAiTranslatedSubs"):
         pos = page_src.find('id="%s"' % cid)
         check("F-M527: %s keeps the marker nested inside its label text" % cid,
               pos > 0 and 'SubDL only</span></span>' in page_src[pos:pos + 700])
@@ -1968,8 +1971,8 @@ def main():
 
     # F-M533: der Melde-Schalter wirkt auf BEIDE Quellen und darf keinen Quellenmerker tragen.
     check("F-M533: the report switch carries no source marker any more",
-          page_src.count('>SubDL only</span>') == 4,
-          "%d Abzeichen (erwartet 4: Tageslimit x2, HI, AI — Melde-, Pack- und Cache-Felder tragen keins)"
+          page_src.count('>SubDL only</span>') == 3,
+          "%d Abzeichen (erwartet 3: Tageslimit x2 und AI — Melde-, Pack-, Cache- und HI-Schalter tragen keins)"
           % page_src.count('>SubDL only</span>'))
     check("F-M533: the report switch is named without a source",
           "<span>Report broken subtitles</span>" in page_src)
