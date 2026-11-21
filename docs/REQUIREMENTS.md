@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 32 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 33 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -3107,3 +3107,11 @@ season pack skipped — tt… S2 [EN non-HI]: no source left open — subdl refu
 ```
 
 Bleibt neben einer geschlossenen Quelle eine offene übrig, sammelt der Slot weiter und nennt die geschlossene Quelle auf der Detail-Stufe. Das Verhalten in Worten: **abgelehnt + Signatur unverändert** = keine Extraktion, eine Zeile; **neue Folge oder neue Datei** (andere Signatur) = wird gesammelt und erneut versucht; **Inhalt gleich, aber die Quelle hat den Behälter inzwischen** = `HasPack` gewinnt (F-M647, es entsteht keine zweite Zeile); **Quelle aus** = steht gar nicht erst im Slot (F-M495). Ein durchgegangener Behälter räumt die Signatur mit der Absage weg (`RecordPack`), und der GUI-Reset einer Einzeldatei (F-M620) hebt sie mit der Absage der Staffel auf — sonst bliebe ein zurückgesetzter Pack für immer geschlossen. Geprüft von T333.
+
+**F-M662 [D]:** **Der tvst-Client kann die Staffel-ZIP holen und HI von Regular trennen — beides steht auf der Seite, nicht im Namen.** Gemessen am 21.11.2026 an MobLand S02:
+
+- `https://www.tvsubtitles.net/subtitle-3234-2-en.html` heißt „Download subtitles for MobLand season 2 (season 2 episode 1-10)" und trägt den Link `download-3234-2-en.html`; der antwortet (mit dem Cookie der Staffelseite) mit einer Umleitung auf `/files/seasons/MobLand - season 2.en.zip` — **610.807 B, 27 Einträge, 9 Folgen**, **9 davon mit `.HI.`**.
+- Regular und HI liegen also in **EINER** ZIP je Staffel und Sprache; der Unterschied steht im Dateinamen (`…WEB.NeoNoir.en.srt` gegen `…WEB.NeoNoir.HI.en.srt`). Für tvst sind daher **keine zwei getrennten Staffel-Packs** nötig.
+- Auf der Folgenseite steht HI **nur** als Bild: `<img src="images/hi.png" alt="hearing impaired">` (Eintrag `subtitle-330930`), während der Regular-Eintrag daneben (`subtitle-330929`) identisch heißt — ohne das Bild ist er nicht zu unterscheiden.
+
+Der Client bietet dafür `DownloadSeasonArchiveAsync(showId, season, language)` (Staffelseite als Cookie-Vorbedingung, dann die ZIP) und `ReadSeasonArchive(byte[])` (Folge, Sprache und `HearingImpaired` je `.srt`-Eintrag); `ParseEntries` setzt `TvSubtitlesEntry.HearingImpaired` aus dem Ohr-Bild. Geprüft in `tvsubtitles` (Ohr-Bild an/aus, ZIP mit Regular und HI). Die Einordnung in den Lauf — Reihenfolge der Quellen nach GUI, innerhalb tvst die Staffel-ZIP vor dem Einzeleintrag — folgt als eigener Schritt.

@@ -250,6 +250,24 @@ public sealed class TvSubtitlesClient
     private static readonly Regex SubtitleAnchor = new(
         "<a href=\"/subtitle-(\\d+)\\.html\">", RegexOptions.CultureInvariant);
 
+    // F-M662 (21.11.2026): the ear icon is the ONLY thing that tells a hearing-impaired entry from a
+    // regular one — both carry the same name on the page (measured: MobLand 2x10, subtitle-330929
+    // regular / subtitle-330930 with `images/hi.png`, both "MobLand 2x10 (WEB.NeoNoir)").
+    private static readonly Regex HiMark = new(
+        "images/hi\\.png", RegexOptions.CultureInvariant);
+
+    // F-M662: the season pack link on /subtitle-<show>-<season>-<lang>.html.
+    private static readonly Regex SeasonDownload = new(
+        "href=\"?(?:/)?(download-\\d+-\\d+-([a-z]{2,3})\\.html)", RegexOptions.CultureInvariant);
+
+    // F-M662: "MobLand - 2x05 - Birdland.WEB.NeoNoir.HI.en.srt" — episode number, HI marker, language.
+    private static readonly Regex PackMember = new(
+        "(\\d+)x(\\d+)", RegexOptions.CultureInvariant);
+    private static readonly Regex PackHi = new(
+        "\\.hi\\.", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex PackLanguage = new(
+        "\\.([a-z]{2,3})\\.srt$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+
     // ============================================================
     // F-M543 (16.11.2026): was in diesem Lauf schon gefragt wurde, wird nicht erneut gefragt.
     //
@@ -1026,7 +1044,8 @@ public sealed class TvSubtitlesClient
                 flag.Groups[1].Value.ToLowerInvariant(),
                 rip.Success ? rip.Groups[1].Value.Trim() : string.Empty,
                 release.Success ? release.Groups[1].Value.Trim() : string.Empty,
-                age.Success ? age.Groups[1].Value.Trim() : string.Empty));
+                age.Success ? age.Groups[1].Value.Trim() : string.Empty,
+                HiMark.IsMatch(block)));
         }
 
         return entries;
@@ -1124,6 +1143,127 @@ public sealed class TvSubtitlesClient
         using var buffer = new MemoryStream();
         await entryStream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
         return (member.Name, buffer.ToArray());
+    }
+
+    /// <summary>
+    /// F-M662 (Bediener-Anweisung 21.11.2026: „bevorzugt staffelpacks von tvst und die dann auch cachen",
+    /// „Auch auf tvst regulär und hi suchen"): the season archive of ONE language.
+    /// <para>
+    /// Measured 21.11.2026 on MobLand S02: <c>/subtitle-3234-2-en.html</c> ("Download subtitles for
+    /// MobLand season 2 (season 2 episode 1-10)") carries the link <c>download-3234-2-en.html</c>,
+    /// which answers with a redirect to <c>/files/seasons/MobLand - season 2.en.zip</c> — 610.807 B,
+    /// 27 members for 9 episodes. BOTH sides are inside that ONE archive, told apart by <c>.HI.</c>
+    /// in the member name, so no source needs two separate season packs.
+    /// </para>
+    /// <para>
+    /// The season page is fetched first because the download page only answers with the cookie that
+    /// page sets — without it the site replies "your browser cookies are disabled".
+    /// </para>
+    /// </summary>
+    /// <param name="showId">The site's show id (<c>tvshow-&lt;id&gt;.html</c>).</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">The site's two/three letter language code, e.g. <c>en</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The archive bytes, or null when the site carries no pack for this language.</returns>
+    public async Task<byte[]?> DownloadSeasonArchiveAsync(
+        int showId, int season, string language, CancellationToken cancellationToken = default)
+    {
+        if (showId <= 0 || season <= 0 || string.IsNullOrWhiteSpace(language))
+        {
+            return null;
+        }
+
+        string lang = language.Trim().ToLowerInvariant();
+        string page = string.Format(
+            CultureInfo.InvariantCulture, "{0}/subtitle-{1}-{2}-{3}.html", BaseUrl, showId, season, lang);
+
+        var html = await GetStringAsync(page, null, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(html))
+        {
+            return null;
+        }
+
+        string? link = null;
+        foreach (Match m in SeasonDownload.Matches(html))
+        {
+            if (m.Groups[2].Value.Equals(lang, StringComparison.OrdinalIgnoreCase))
+            {
+                link = m.Groups[1].Value;
+                break;
+            }
+        }
+
+        if (link == null)
+        {
+            return null;
+        }
+
+        string downloadPage = BaseUrl + "/" + Uri.EscapeUriString(link);
+        var answer = await GetBytesAsync(downloadPage, page, cancellationToken).ConfigureAwait(false);
+        if (IsZip(answer))
+        {
+            return answer;
+        }
+
+        var name = ParseDownloadFileName(Encoding.UTF8.GetString(answer));
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        string url = BaseUrl + "/" + Uri.EscapeUriString(name).Replace("?", "%3F", StringComparison.Ordinal);
+        var zip = await GetBytesAsync(url, downloadPage, cancellationToken).ConfigureAwait(false);
+        return IsZip(zip) ? zip : null;
+    }
+
+    /// <summary>
+    /// F-M662: splits a season archive into its episodes, keeping the two sides apart.
+    /// <para>
+    /// Member names look like <c>MobLand - 2x05 - Birdland.WEB.NeoNoir.HI.en.srt</c> — the episode
+    /// number sits between the dashes, the language is the last token before <c>.srt</c>, and
+    /// <c>.HI.</c> marks the hearing-impaired side. A Hindi file would be named <c>…​.hi.srt</c> and
+    /// therefore never matches <c>.hi.</c> (the trailing dot is what separates the two).
+    /// </para>
+    /// </summary>
+    /// <param name="zip">The archive bytes.</param>
+    /// <returns>One entry per <c>.srt</c> member, in archive order.</returns>
+    public static IReadOnlyList<TvSubtitlesPackFile> ReadSeasonArchive(byte[] zip)
+    {
+        var files = new List<TvSubtitlesPackFile>();
+        if (!IsZip(zip))
+        {
+            return files;
+        }
+
+        using var stream = new MemoryStream(zip, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        foreach (var entry in archive.Entries)
+        {
+            if (!entry.Name.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var number = PackMember.Match(entry.Name);
+            if (!number.Success)
+            {
+                continue;
+            }
+
+            var language = PackLanguage.Match(entry.Name);
+            using var member = entry.Open();
+            using var buffer = new MemoryStream();
+            member.CopyTo(buffer);
+            files.Add(new TvSubtitlesPackFile(
+                entry.Name,
+                int.Parse(number.Groups[1].Value, CultureInfo.InvariantCulture),
+                int.Parse(number.Groups[2].Value, CultureInfo.InvariantCulture),
+                language.Success ? language.Groups[1].Value.ToLowerInvariant() : string.Empty,
+                PackHi.IsMatch(entry.Name),
+                buffer.ToArray()));
+        }
+
+        return files;
     }
 
     /// <summary>
@@ -1743,8 +1883,21 @@ public sealed class TvSubtitlesClient
 /// <param name="Rip">The rip cell's text, empty when the entry has none.</param>
 /// <param name="Release">The release cell's text, empty when the entry has none.</param>
 /// <param name="Age">The timestamp the page shows, as written.</param>
+/// <param name="HearingImpaired">F-M662: the entry carries the site's ear icon (<c>images/hi.png</c>).</param>
 public sealed record TvSubtitlesEntry(
-    string SubtitleId, string Language, string Rip, string Release, string Age);
+    string SubtitleId, string Language, string Rip, string Release, string Age, bool HearingImpaired = false);
+
+/// <summary>
+/// F-M662: one member of a tvsubtitles season archive.
+/// </summary>
+/// <param name="Name">The member name as written in the archive.</param>
+/// <param name="Season">Season number read from the member name.</param>
+/// <param name="Episode">Episode number read from the member name.</param>
+/// <param name="Language">Language code from the member name's last token, e.g. <c>en</c>.</param>
+/// <param name="HearingImpaired">The member carries the <c>.HI.</c> marker.</param>
+/// <param name="Data">The subtitle bytes, untouched.</param>
+public sealed record TvSubtitlesPackFile(
+    string Name, int Season, int Episode, string Language, bool HearingImpaired, byte[] Data);
 
 /// <summary>
 /// F-M480: a finished upload payload — the form's fields, the file and the two derived names.

@@ -811,6 +811,30 @@ internal static class Program
             tagHandler.LastUrl);
 
 
+        // --- F-M662: die HI-Seite steht im Ohr-Bild, und eine Staffel-ZIP traegt beide Seiten ----------
+        string entryHtml =
+            "<a href=\"/subtitle-1.html\"><div class=\"subtitlen\"><h5><img src=\"images/flags/en.gif\">MobLand 2x10 (WEB.NeoNoir)</h5>"
+            + "<p title=\"downloaded\"><img src=\"images/downloads.png\">477</p></div></a>"
+            + "<a href=\"/subtitle-2.html\"><div class=\"subtitlen\"><h5><img src=\"images/flags/en.gif\">MobLand 2x10 (WEB.NeoNoir)</h5>"
+            + "<p title=\"downloaded\"><img src=\"images/downloads.png\">49</p>"
+            + "<p title=\"downloaded\"><img src=\"images/hi.png\" width=\"16\" alt=\"hearing impaired\" title=\"hearing impaired\"></p></div></a>";
+        var parsed = TvSubtitlesClient.ParseEntries(entryHtml);
+        Check("F-M662: HI steht nur im Ohr-Bild — die Namen beider Eintraege sind gleich",
+            parsed.Count == 2
+            && !parsed[0].HearingImpaired
+            && parsed[1].HearingImpaired
+            && parsed[0].Release == parsed[1].Release
+            && parsed[0].Language == "en",
+            string.Join(" | ", parsed.Select(p => p.Release + "/hi=" + p.HearingImpaired)));
+
+        var packFiles = TvSubtitlesClient.ReadSeasonArchive(BuildSeasonZip());
+        Check("F-M662: EINE Staffel-ZIP traegt Regular und HI, getrennt durch .HI. vor dem Sprachkuerzel",
+            packFiles.Count == 3
+            && packFiles.Count(f => f.HearingImpaired) == 1
+            && packFiles.Where(f => f.Episode == 5).All(f => f.Language == "en")
+            && packFiles.Any(f => f.Episode == 10 && !f.HearingImpaired),
+            string.Join(" | ", packFiles.Select(f => f.Episode + "/hi=" + f.HearingImpaired)));
+
         if (_failures > 0)
         {
 
@@ -820,6 +844,28 @@ internal static class Program
 
         Console.WriteLine($">>> TVSUBTITLES OK: {_checks} Pruefungen bestanden");
         return 0;
+    }
+
+    private static byte[] BuildSeasonZip()
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new System.IO.Compression.ZipArchive(
+            buffer, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            foreach (string member in new[]
+                     {
+                         "MobLand - 2x05 - Birdland.WEB.NeoNoir.en.srt",
+                         "MobLand - 2x05 - Birdland.WEB.NeoNoir.HI.en.srt",
+                         "MobLand - 2x10 - The Queen is Dead.WEB.NeoNoir.en.srt",
+                     })
+            {
+                var bytes = Encoding.UTF8.GetBytes("1\n00:00:01,000 --> 00:00:02,000\nText\n");
+                using var stream = archive.CreateEntry(member).Open();
+                stream.Write(bytes, 0, bytes.Length);
+            }
+        }
+
+        return buffer.ToArray();
     }
 
     private static string Fixture(string name)
