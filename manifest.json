@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.25",
-        "changelog": "v12.2.0.25: the two archive-cache settings stop claiming a source — the cache serves every engine, so the wrong \"SubDL only\" badge is gone and the page says only what the fields do (F-M665).",
+        "version": "12.2.0.26",
+        "changelog": "v12.2.0.26: the hearing-impaired switch stops claiming a source (tvsubtitles delivers HI too) and the two archive-cache descriptions state the defaults the code uses, 7 days and 256 MB, instead of 14 and 512 (F-M664, F-M665).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.25-dev/Jellyfin.Plugin.SubdlSync_12.2.0.25.zip",
-        "checksum": "f74864354b5ec2dd23425716b528f05c",
-        "timestamp": "2026-11-21T09:09:14Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.26-dev/Jellyfin.Plugin.SubdlSync_12.2.0.26.zip",
+        "checksum": "cbcffa27fe3b6574bcf74d3d8875db9e",
+        "timestamp": "2026-11-21T09:14:21Z"
       }
     ]
   }
