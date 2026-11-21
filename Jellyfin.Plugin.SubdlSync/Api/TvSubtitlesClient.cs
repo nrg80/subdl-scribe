@@ -1267,6 +1267,139 @@ public sealed class TvSubtitlesClient
     }
 
     /// <summary>
+    /// F-M663 (21.11.2026): EIN Abruf je (Serie, Staffel, Sprache) pro Lauf.
+    /// <para>
+    /// Der Lauf fragt jede Folge EINZELN an (<c>SearchAsync</c> je Medium), die ZIP gilt aber fuer die
+    /// ganze Staffel: bei MobLand S02 sind das 9 Folgen je 610.807 B fuer dieselben 27 Dateien. Der
+    /// Merker haelt die GELESENEN Eintraege samt Bytes, damit sowohl die naechste Folge (Suche) als
+    /// auch der Abruf eines Treffers keine zweite Anfrage kosten.
+    /// </para>
+    /// <para>
+    /// Ein Fehlschlag wird MITGEMERKT (leere Liste plus Grund): „ein Abruf je Staffel und Sprache" gilt
+    /// auch dann, wenn er schiefgeht — sonst klopfte jede der neun Folgen erneut an eine Seite, die
+    /// schon nicht geantwortet hat.
+    /// </para>
+    /// </summary>
+    private readonly System.Collections.Generic.Dictionary<
+        (int ShowId, int Season, string Language),
+        (IReadOnlyList<TvSubtitlesPackFile> Files, string? Error)> _seasonPacks = new();
+
+    /// <summary>
+    /// F-M663: warum die Staffel-ZIP des zuletzt gefragten (Serie, Staffel, Sprache) nicht nutzbar
+    /// war — null, wenn sie gelesen wurde. Nur fuer die Logzeile des Laufs; hier wirft nichts.
+    /// </summary>
+    public string? LastSeasonPackError { get; private set; }
+
+    /// <summary>
+    /// F-M663: die Eintraege der Staffel-ZIP einer Sprache — geholt beim ERSTEN Aufruf, danach aus dem
+    /// Merker (<see cref="_seasonPacks"/>). Leer, wenn die Seite keine ZIP fuer diese Sprache traegt
+    /// oder sie nicht lesbar ist; der Grund steht dann in <see cref="LastSeasonPackError"/>.
+    /// <para>
+    /// Es wird NICHTS geworfen ausser einem echten Abbruch: Stufe 1 ist eine Abkuerzung, kein Muss —
+    /// faellt sie aus, laeuft der Einzelweg der Folgenseite weiter.
+    /// </para>
+    /// </summary>
+    /// <param name="showId">The site's show id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">The site's language code, e.g. <c>en</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>One entry per <c>.srt</c> member; empty when there is no usable archive.</returns>
+    public async Task<IReadOnlyList<TvSubtitlesPackFile>> SeasonPackAsync(
+        int showId, int season, string language, CancellationToken cancellationToken = default)
+    {
+        string lang = (language ?? string.Empty).Trim().ToLowerInvariant();
+        lock (_seasonPacks)
+        {
+            if (_seasonPacks.TryGetValue((showId, season, lang), out var gemerkt))
+            {
+                LastSeasonPackError = gemerkt.Error;
+                return gemerkt.Files;
+            }
+        }
+
+        IReadOnlyList<TvSubtitlesPackFile> files = Array.Empty<TvSubtitlesPackFile>();
+        string? fehler = null;
+        try
+        {
+            var zip = await DownloadSeasonArchiveAsync(showId, season, lang, cancellationToken).ConfigureAwait(false);
+            if (zip is null)
+            {
+                fehler = "die Staffelseite trug keine ZIP fuer " + lang;
+            }
+            else
+            {
+                files = ReadSeasonArchive(zip);
+                if (files.Count == 0)
+                {
+                    fehler = "die ZIP (" + zip.Length.ToString(CultureInfo.InvariantCulture) + " B) trug keinen lesbaren .srt-Eintrag";
+                }
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            fehler = "keine Antwort der Seite (Client-Timeout)";
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // F-M663: kaputte ZIP, halbe Antwort, was auch immer — EINE Zeile Grund, kein Abbruch.
+            fehler = ex.GetType().Name + ": " + ex.Message;
+        }
+
+        LastSeasonPackError = fehler;
+        lock (_seasonPacks)
+        {
+            if (_seasonPacks.Count >= MemoLimit)
+            {
+                _seasonPacks.Clear();
+            }
+
+            _seasonPacks[(showId, season, lang)] = (files, fehler);
+        }
+
+        return files;
+    }
+
+    /// <summary>
+    /// F-M663: verwirft die gemerkten Staffel-ZIPs (Bytes und Fehlschlag). Noetig, wenn WIR eine Staffel
+    /// veraendern — dieselbe Regel wie <see cref="ClearSeasonMemos"/> fuer die Folgenliste.
+    /// </summary>
+    public void ClearSeasonPacks()
+    {
+        lock (_seasonPacks)
+        {
+            _seasonPacks.Clear();
+        }
+    }
+
+    /// <summary>
+    /// F-M663: EIN Mitglied der gemerkten Staffel-ZIP, ohne zweite Anfrage — der Treffer der Stufe 1
+    /// traegt nur seine Nummer im Archiv, die Bytes liegen im Merker.
+    /// </summary>
+    /// <param name="showId">The site's show id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">The site's language code.</param>
+    /// <param name="index">Position in <see cref="SeasonPackAsync"/>'s list.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The member name and its raw bytes.</returns>
+    public async Task<(string Name, byte[] Data)> DownloadPackMemberAsync(
+        int showId, int season, string language, int index, CancellationToken cancellationToken = default)
+    {
+        var files = await SeasonPackAsync(showId, season, language, cancellationToken).ConfigureAwait(false);
+        if (index < 0 || index >= files.Count)
+        {
+            throw new InvalidOperationException(
+                "the season archive carries no member #" + index.ToString(CultureInfo.InvariantCulture)
+                + " (" + files.Count.ToString(CultureInfo.InvariantCulture) + " available, tvsubtitles.net)");
+        }
+
+        return (files[index].Name, files[index].Data);
+    }
+
+    /// <summary>
     /// F-M481/F-M574: der Kommentar eines Uploads. Kennungen und Zusatz, sonst nichts — der frueher
     /// hier gebaute Client-Tag (Produktname plus laufende Version) ist am 20.11.2026 entfallen: er
     /// wurde von keiner Stelle gesendet, und F-M641 verbietet Version und Client-Namen im Kommentar.

@@ -100,6 +100,74 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
         // damit der nächste Lauf die Serienliste gar nicht erst holen muss (F-M501).
         _client.LastResolvedShowId = showId.Value;
 
+        var hits = new List<SubtitleHit>();
+
+        // F-M663 (Bediener-Anweisung 21.11.2026): STUFE 1 ist die Staffel-ZIP. Gemessen an MobLand S02:
+        // 27 Dateien fuer 9 Folgen in EINER ZIP je Sprache (610.807 B), Regular und HI durch `.HI.`
+        // getrennt. Der Merker im Client haelt sie fuer den ganzen Lauf, also kostet die Staffel EINEN
+        // Abruf statt einen je Folge.
+        bool regulaerGedeckt = false;
+        bool hiGedeckt = false;
+        if (query.Season > 0)
+        {
+            var pack = await _client.SeasonPackAsync(showId.Value, query.Season, language, cancellationToken)
+                .ConfigureAwait(false);
+            for (int i = 0; i < pack.Count; i++)
+            {
+                var datei = pack[i];
+                if (datei.Season != query.Season || datei.Episode != query.Episode)
+                {
+                    continue;
+                }
+
+                if (!string.Equals(datei.Language, language, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string release = datei.Name.EndsWith(".srt", StringComparison.OrdinalIgnoreCase)
+                    ? datei.Name[..^4]
+                    : datei.Name;
+
+                // F-M663: dieselben Tore wie ein Eintrag der Folgenseite — Sprache und Rip gegen das
+                // Vokabular der Seite. Nur der MELDEWEG faellt hier aus: ein ZIP-Eintrag hat keine sid,
+                // und eine „Report bad"-Anfrage mit erfundener Nummer waere schlimmer als kein Bericht.
+                var pruefung = TvstMetadataChecks.CheckEntry(
+                    new TvSubtitlesEntry(string.Empty, datei.Language, string.Empty, release, string.Empty, datei.HearingImpaired));
+                if (pruefung.Count > 0)
+                {
+                    LastRejectedByFormat++;
+                    continue;
+                }
+
+                hits.Add(new SubtitleHit(
+                    SubtitleProvider.TvSubtitles,
+                    SeasonPackId(showId.Value, query.Season, language, i),
+                    datei.Language,
+                    string.Empty,
+                    release,
+                    false,
+                    datei.HearingImpaired));
+
+                if (datei.HearingImpaired)
+                {
+                    hiGedeckt = true;
+                }
+                else
+                {
+                    regulaerGedeckt = true;
+                }
+            }
+        }
+
+        // F-M663: STUFE 2 ist der heutige Weg (Folgenseite) — und sie laeuft fuer JEDE Seite weiter, die
+        // Stufe 1 nicht gedeckt hat. Fehlt die Folge in der ZIP, fehlt dort nur die HI-Fassung, oder
+        // ist die ZIP kaputt, blockiert Stufe 1 den Einzelweg also nicht.
+        if (regulaerGedeckt && hiGedeckt)
+        {
+            return hits;
+        }
+
         var pages = await _client.EpisodePagesAsync(showId.Value, query.Season, cancellationToken)
             .ConfigureAwait(false);
 
@@ -123,10 +191,16 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
             }
 
             var entries = await _client.EntriesAsync(page, cancellationToken).ConfigureAwait(false);
-            var hits = new List<SubtitleHit>();
             foreach (var e in entries)
             {
                 if (!string.Equals(e.Language, language, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                // F-M663: eine Seite, die Stufe 1 schon gedeckt hat, wird hier nicht ein zweites Mal
+                // gefuellt — und eine HI-Datei landet nie auf der regulaeren Seite (und umgekehrt).
+                if (e.HearingImpaired ? hiGedeckt : regulaerGedeckt)
                 {
                     continue;
                 }
@@ -141,13 +215,73 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
                 }
 
                 hits.Add(new SubtitleHit(
-                    SubtitleProvider.TvSubtitles, e.SubtitleId, e.Language, e.Rip, e.Release, false));
+                    SubtitleProvider.TvSubtitles, e.SubtitleId, e.Language, e.Rip, e.Release, false, e.HearingImpaired));
+
+                if (e.HearingImpaired)
+                {
+                    hiGedeckt = true;
+                }
+                else
+                {
+                    regulaerGedeckt = true;
+                }
             }
 
-            return hits;
+            if (regulaerGedeckt && hiGedeckt)
+            {
+                break;
+            }
         }
 
-        return Array.Empty<SubtitleHit>();
+        return hits;
+    }
+
+    /// <summary>
+    /// F-M663: der Griff eines Treffers aus der Staffel-ZIP. Die Seite kennt fuer eine Staffel-ZIP
+    /// keine Einzel-Ids (anders als fuer jede Datei der Folgenseite) — der Griff nennt deshalb, was der
+    /// Merker im Client braucht: Serie, Staffel, Sprache und die Nummer des Eintrags im Archiv.
+    /// </summary>
+    /// <param name="showId">The site's show id.</param>
+    /// <param name="season">Season number.</param>
+    /// <param name="language">The site's language code.</param>
+    /// <param name="index">Position in the archive's entry list.</param>
+    /// <returns>The handle, e.g. <c>seasonpack:3234:2:en:4</c>.</returns>
+    public static string SeasonPackId(int showId, int season, string language, int index) =>
+        "seasonpack:"
+        + showId.ToString(CultureInfo.InvariantCulture) + ":"
+        + season.ToString(CultureInfo.InvariantCulture) + ":"
+        + (language ?? string.Empty).Trim().ToLowerInvariant() + ":"
+        + index.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// F-M663: liest <see cref="SeasonPackId"/> zurueck. Falsch fuer jeden anderen Griff — eine
+    /// Subtitle-id der Seite ist eine Zahl und darf nie als Archiv-Eintrag gelesen werden.
+    /// </summary>
+    /// <param name="id">The handle a hit carries.</param>
+    /// <param name="showId">Show id, 0 when the handle is not a season pack.</param>
+    /// <param name="season">Season, 0 when the handle is not a season pack.</param>
+    /// <param name="language">The site's language code, empty when the handle is not a season pack.</param>
+    /// <param name="index">Entry number, -1 when the handle is not a season pack.</param>
+    /// <returns>True when the handle names an entry of a season archive.</returns>
+    public static bool TryParseSeasonPackId(
+        string? id, out int showId, out int season, out string language, out int index)
+    {
+        showId = 0;
+        season = 0;
+        language = string.Empty;
+        index = -1;
+        if (string.IsNullOrEmpty(id) || !id.StartsWith("seasonpack:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var parts = id.Split(':');
+        return parts.Length == 5
+            && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out showId)
+            && int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out season)
+            && int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out index)
+            && (language = parts[3]).Length > 0
+            && index >= 0;
     }
 
     /// <inheritdoc />
@@ -158,6 +292,15 @@ public sealed class TvSubtitlesDownloadEndpoint : IDownloadEndpoint
         if (string.IsNullOrWhiteSpace(hit.Id))
         {
             return null;
+        }
+
+        // F-M663: ein Treffer aus der Staffel-ZIP wird aus dem Merker gelesen — KEINE zweite Anfrage.
+        if (TryParseSeasonPackId(hit.Id, out int showId, out int season, out string packLanguage, out int index))
+        {
+            var (packName, packData) = await _client
+                .DownloadPackMemberAsync(showId, season, packLanguage, index, cancellationToken)
+                .ConfigureAwait(false);
+            return packData.Length == 0 ? null : new SubtitlePayload(packName, packData, hit.Language);
         }
 
         var (name, data) = await _client.DownloadAsync(hit.Id, cancellationToken).ConfigureAwait(false);

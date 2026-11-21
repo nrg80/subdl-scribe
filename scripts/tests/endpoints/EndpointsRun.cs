@@ -230,6 +230,54 @@ internal static class Program
             payload is not null && payload.Data.Length > 0 && payload.FileName.EndsWith(".srt", StringComparison.Ordinal),
             payload is null ? "no payload" : payload.FileName + " " + payload.Data.Length + " B");
 
+        // ---- 5b. F-M663: die Staffel-ZIP (Stufe 1) fuellt BEIDE Seiten, getrennt ----------------
+        // Die Trennung ist eine reine Funktion (DownloadPipeline.SplitByHearingImpaired) und wird hier
+        // ohne Lauf geprueft: regulaer auf die regulaere Seite, HI auf die HI-Seite, nie beide.
+        var gemischt = new[]
+        {
+            new SubtitleHit(SubtitleProvider.TvSubtitles, "seasonpack:3234:2:en:0", "en", string.Empty, "MobLand - 2x05 - Birdland.WEB.NeoNoir", false, false),
+            new SubtitleHit(SubtitleProvider.TvSubtitles, "seasonpack:3234:2:en:1", "en", string.Empty, "MobLand - 2x05 - Birdland.WEB.NeoNoir.HI", false, true),
+            new SubtitleHit(SubtitleProvider.TvSubtitles, "seasonpack:3234:2:en:2", "en", string.Empty, "MobLand - 2x06 - Titel.WEB.NeoNoir.HI", false, true),
+        };
+        var getrennt = Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.SplitByHearingImpaired(
+            gemischt, SubtitleProvider.TvSubtitles, "en", 2, 5);
+        Check("F-M663: ein regulaerer Treffer geht auf die regulaere Seite, ein HI-Treffer auf die HI-Seite — nie beide",
+            getrennt.Regular.Count == 1 && getrennt.HearingImpaired.Count == 2
+            && !getrennt.Regular[0].HearingImpaired
+            && getrennt.Regular[0].Url == "seasonpack:3234:2:en:0"
+            && getrennt.HearingImpaired.All(c => c.HearingImpaired)
+            && getrennt.Regular.Concat(getrennt.HearingImpaired).All(c => c.Provider == SubtitleProvider.TvSubtitles)
+            && getrennt.Regular.Concat(getrennt.HearingImpaired).All(c => c.Language == "EN" && c.Season == 2 && c.Episode == 5),
+            "regular=" + string.Join(",", getrennt.Regular.Select(c => c.Url))
+            + " hi=" + string.Join(",", getrennt.HearingImpaired.Select(c => c.Url)));
+        Check("F-M663: der Griff eines ZIP-Treffers ist kein Subtitle-id und wird auch nicht dafuer gehalten",
+            TvSubtitlesDownloadEndpoint.TryParseSeasonPackId("seasonpack:3234:2:en:7", out int pShow, out int pSeason, out string pLang, out int pIndex)
+            && pShow == 3234 && pSeason == 2 && pLang == "en" && pIndex == 7
+            && !TvSubtitlesDownloadEndpoint.TryParseSeasonPackId("170678", out _, out _, out _, out _)
+            && !TvSubtitlesDownloadEndpoint.TryParseSeasonPackId("seasonpack:3234:2:en", out _, out _, out _, out _)
+            && !TvSubtitlesDownloadEndpoint.TryParseSeasonPackId(null, out _, out _, out _, out _));
+
+        // ---- 5c. F-M663: die Naht im Lauf (Quelltext-Grenzen, wie die uebrigen F-M5xx-Pruefungen) --
+        var pipeline663 = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Pipeline/DownloadPipeline.cs"));
+        Check("F-M663: die HI-Treffer der Zusatzquellen landen im HI-Pool und nicht in der regulaeren Liste",
+            pipeline663.Contains("fremdHiProSprache", StringComparison.Ordinal)
+            && pipeline663.Contains("hiCandidates.AddRange(liste);", StringComparison.Ordinal)
+            && pipeline663.Contains("SplitByHearingImpaired(", StringComparison.Ordinal)
+            && pipeline663.Contains("hiZiel.AddRange(hi);", StringComparison.Ordinal));
+        Check("F-M663: die HI-Fassung wird bei der QUELLE des Kandidaten geholt, nicht ueber SubDLs Archiv",
+            pipeline663.Contains("hi.Provider == MainSearchSource", StringComparison.Ordinal)
+            && pipeline663.Split(": await FetchForeignHitAsync(hi, ct)").Length - 1 == 2
+            && pipeline663.Contains("FetchForeignHitAsync(SubtitleCandidate hit, CancellationToken ct)", StringComparison.Ordinal)
+            && !pipeline663.Contains("DownloadOutcome hiDl = await FetchArchiveAsync", StringComparison.Ordinal),
+            "SubDL-Zweig behaelt sein Archiv, der fremde Zweig geht ueber den Endpunkt");
+        var tvstSource663 = ReadText(Path.Combine(root, "Jellyfin.Plugin.SubdlSync/Api/Endpoints/TvSubtitlesEndpoints.cs"));
+        Check("F-M663: die Suche fragt zuerst die Staffel-ZIP und laesst die Folgenseite nur fuer die fehlende Seite laufen",
+            tvstSource663.Contains("SeasonPackAsync(", StringComparison.Ordinal)
+            && tvstSource663.Contains("if (regulaerGedeckt && hiGedeckt)", StringComparison.Ordinal)
+            && tvstSource663.IndexOf("SeasonPackAsync(", StringComparison.Ordinal)
+               < tvstSource663.IndexOf("EpisodePagesAsync(", StringComparison.Ordinal),
+            "Staffel-ZIP vor der Folgenliste");
+
         // ---- 6. the tvsubtitles upload endpoint: dry run, and refusals -------------------------
         var tvUpload = new TvSubtitlesUploadEndpoint(tvClient, dryRun: true);
         var ticket = new UploadTicket(
@@ -325,8 +373,11 @@ internal static class Program
             downloadSource.Contains("foreach (var quelle in quellenReihenfolge)", StringComparison.Ordinal)
             // F-M507: der Aufruf traegt zusaetzlich TMDb-Id, Medienpfad und Medien-Hash — die dritte
             // Quelle loest ihren Film ueber TMDb auf und legt die Nummer am Medium ab.
+            // F-M663: dazu kommt der Korb fuer die HI-Treffer (`hiKorb`) — die Signatur endet deshalb
+            // auf `mediaHash, hiKorb, ct`, und die Absicht dieser Pruefung bleibt dieselbe: die Quelle
+            // wird gefragt, BEVOR der Ausstieg bei leerer Antwort greift.
             && downloadSource.Contains(
-                "ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, ct)",
+                "ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, hiKorb, ct)",
                 StringComparison.Ordinal)
             && downloadSource.Contains("if (candidates.Count == 0 && !fremdProSprache.Values.Any(", StringComparison.Ordinal)
             && downloadSource.IndexOf("ForeignCandidatesAsync(quelle, title", StringComparison.Ordinal)
@@ -2638,7 +2689,10 @@ internal static class Program
             && downloadSource.Contains(".ResolveForMediaAsync(Registry, mediaHash, movie, _config.DownloadDryRun, ct, mediaPath)", StringComparison.Ordinal)
             && downloadSource.Contains("var movie = await _tmdb.MovieInfoAsync(tmdbId!, ct)", StringComparison.Ordinal)
             && downloadSource.Contains("MovieId: film.MovieId!.Value.ToString(", StringComparison.Ordinal)
-            && downloadSource.Contains("Season = isSeries ? season : 0,", StringComparison.Ordinal));
+            // F-M663: die Abbildung Treffer -> Kandidat steht jetzt in SplitByHearingImpaired; die
+            // Medienart schneidet Staffel und Folge dort an der Aufrufstelle auf 0 — dieselbe Aussage
+            // wie vorher, nur eine Ebene weiter vorn.
+            && downloadSource.Contains("isSeries ? season : 0, isSeries ? episode : 0)", StringComparison.Ordinal));
 
         // (i) Der Endpunkt der dritten Quelle am Stueck: Suche ueber Titel und Jahr, EINE Filmseite je
         // Film und Lauf, die Sprache aus der Flagge des Eintrags.

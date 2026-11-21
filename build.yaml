@@ -10,7 +10,7 @@
 # See the GNU General Public License for more details.
 name: "Sub Scribe"
 guid: "7d1c5a2e-3f4b-4d6e-9a8b-5c2f8e1d4a9b"
-version: "12.2.0.21"
+version: "12.2.0.22"
 targetAbi: "12.1.0.0"
 framework: "net10.0"
 owner: "nrg80"
@@ -26,6 +26,7 @@ artifacts:
 - "Jellyfin.Plugin.SubdlSync.dll"
 - "LanguageDetection.dll"
 changelog: >
+  v12.2.0.22: the download page takes tvsubtitles' season archive as stage 1 — one fetch per series, season and language instead of one per episode, with the regular and the hearing-impaired file kept apart; the single-episode page still carries whatever the archive lacks (F-M663).
   v12.2.0.21: an empty search answer now buys a longer clock — a title no source carries is not asked again at every run, and any search that returns something clears the mark (F-M661).
   v12.2.0.20: the file reset can clear the pack-phase season verdicts too, selectable in the dropdown (F-M660).
   v12.2.0.19: a failed ffmpeg pass is not a verdict — the exit code is read, empty positions are retried one by one, and an inconclusive fill stores no memo; three dead extraction methods removed (F-M659).

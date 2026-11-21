@@ -37,6 +37,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.SubScribe.Api;
 using Jellyfin.Plugin.SubScribe.Api.Endpoints;
+using Jellyfin.Plugin.SubScribe.Configuration;
 
 internal static class Program
 {
@@ -835,6 +836,103 @@ internal static class Program
             && packFiles.Any(f => f.Episode == 10 && !f.HearingImpaired),
             string.Join(" | ", packFiles.Select(f => f.Episode + "/hi=" + f.HearingImpaired)));
 
+        // --- F-M663: die Staffel-ZIP als STUFE 1 vor dem Einzelweg der Folgenseite --------------------
+        // Der Handler fuehrt eine Staffel wie die Seite: Serienliste, Staffelseite mit dem ZIP-Link,
+        // die ZIP selbst (die Seite antwortet auf download-… direkt mit ihr) und Folgenseiten. Er
+        // zaehlt JE ART, damit eine Pruefung die Kosten der Staffel nennen kann statt sie zu behaupten.
+        var staffelHandler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 5), EpisodesOnPages = { 1, 5 } };
+        var staffelEndpoint = new TvSubtitlesDownloadEndpoint(new TvSubtitlesClient(new HttpClient(staffelHandler)));
+
+        var ersteFolge = await staffelEndpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 1, "en")).ConfigureAwait(false);
+        int trefferGesamt = ersteFolge.Count;
+        for (int folge = 2; folge <= 5; folge++)
+        {
+            trefferGesamt += (await staffelEndpoint
+                .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, folge, "en")).ConfigureAwait(false)).Count;
+        }
+
+        Check("F-M663: fuenf Folgen einer Staffel kosten EINEN ZIP-Abruf — Serienliste plus Staffelseite plus ZIP, keine Folgenseite",
+            staffelHandler.ShowLists == 1
+            && staffelHandler.SeasonPages == 1
+            && staffelHandler.DownloadPages == 1
+            && staffelHandler.EpisodeListPages == 0
+            && staffelHandler.EpisodePages == 0
+            && staffelHandler.Requests == 3,
+            "Anfragen: Liste=" + staffelHandler.ShowLists + " Staffel=" + staffelHandler.SeasonPages
+            + " ZIP=" + staffelHandler.DownloadPages + " Folgenliste=" + staffelHandler.EpisodeListPages
+            + " Folgenseite=" + staffelHandler.EpisodePages + " gesamt=" + staffelHandler.Requests);
+        Check("F-M663: jede Folge der ZIP liefert Regular und HI als zwei Treffer",
+            trefferGesamt == 10 && ersteFolge.Count == 2,
+            "Treffer gesamt=" + trefferGesamt + " erste Folge=" + ersteFolge.Count);
+        Check("F-M663: der ZIP-Treffer traegt einen Griff, den die Seite selbst nicht kennt",
+            ersteFolge.All(h => h.Id.StartsWith("seasonpack:", StringComparison.Ordinal))
+            && ersteFolge.All(h => TvSubtitlesDownloadEndpoint.TryParseSeasonPackId(
+                h.Id, out int sid, out int sst, out string slg, out int six)
+                && sid == 3234 && sst == 2 && slg == "en" && six >= 0),
+            string.Join(",", ersteFolge.Select(h => h.Id)));
+
+        // Beide Seiten getrennt: der reguläre Treffer darf nie auf der HI-Seite landen und umgekehrt.
+        var staffelSeite3 = await staffelEndpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 3, "en")).ConfigureAwait(false);
+        var geteilt = Jellyfin.Plugin.SubScribe.Pipeline.DownloadPipeline.SplitByHearingImpaired(
+            staffelSeite3, SubtitleProvider.TvSubtitles, "en", 2, 3);
+        Check("F-M663: der HI-Eintrag der ZIP landet auf der HI-Seite, der regulaere auf der regulaeren",
+            geteilt.Regular.Count == 1 && geteilt.HearingImpaired.Count == 1
+            && !geteilt.Regular[0].HearingImpaired && geteilt.HearingImpaired[0].HearingImpaired
+            && geteilt.Regular[0].Url != geteilt.HearingImpaired[0].Url,
+            "regular=" + string.Join(",", geteilt.Regular.Select(c => c.Url))
+            + " hi=" + string.Join(",", geteilt.HearingImpaired.Select(c => c.Url)));
+
+        var regularPayload = await staffelEndpoint.FetchAsync(staffelSeite3.First(h => !h.HearingImpaired)).ConfigureAwait(false);
+        var hiPayload = await staffelEndpoint.FetchAsync(staffelSeite3.First(h => h.HearingImpaired)).ConfigureAwait(false);
+        string regularText = regularPayload is null ? string.Empty : Encoding.UTF8.GetString(regularPayload.Data);
+        string hiText = hiPayload is null ? string.Empty : Encoding.UTF8.GetString(hiPayload.Data);
+        Check("F-M663: der Griff liefert die Bytes SEINES Eintrags — regular und HI sind nicht vertauscht",
+            regularText.Contains("REGULAR", StringComparison.Ordinal) && !regularText.Contains("HI-FASSUNG", StringComparison.Ordinal)
+            && hiText.Contains("HI-FASSUNG", StringComparison.Ordinal) && !hiText.Contains("REGULAR", StringComparison.Ordinal),
+            (regularPayload?.FileName ?? "—") + " gegen " + (hiPayload?.FileName ?? "—"));
+        Check("F-M663: der Abruf eines ZIP-Treffers kostet KEINE weitere Anfrage",
+            staffelHandler.Requests == 3,
+            "Anfragen nach dem Abruf: " + staffelHandler.Requests);
+
+        // Folge fehlt in der ZIP: Stufe 1 darf Stufe 2 nicht blockieren — genau diese Folge geht den
+        // heutigen Einzelweg ueber ihre Folgenseite.
+        var lueckeHandler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 2), EpisodesOnPages = { 1, 5 } };
+        var lueckeEndpoint = new TvSubtitlesDownloadEndpoint(new TvSubtitlesClient(new HttpClient(lueckeHandler)));
+        var luecke = await lueckeEndpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 5, "en")).ConfigureAwait(false);
+        Check("F-M663: eine Folge, die in der ZIP fehlt, kommt ueber ihre Folgenseite (Stufe 2) — kein Verlust",
+            luecke.Count > 0
+            && luecke.All(h => !h.Id.StartsWith("seasonpack:", StringComparison.Ordinal))
+            && lueckeHandler.EpisodePages > 0,
+            "Treffer=" + string.Join(",", luecke.Select(h => h.Id + "/hi=" + h.HearingImpaired))
+            + " Folgenseiten=" + lueckeHandler.EpisodePages);
+
+        // Kaputte ZIP: Stufe 1 faellt aus, der Lauf bricht nicht ab, Stufe 2 traegt die Staffel.
+        var kaputtHandler = new SeasonPackHandler { Zip = BuildSeasonZipFor(1, 5), BrokenZip = true, EpisodesOnPages = { 1 } };
+        var kaputtClient = new TvSubtitlesClient(new HttpClient(kaputtHandler));
+        var kaputtEndpoint = new TvSubtitlesDownloadEndpoint(kaputtClient);
+        var kaputtHits = await kaputtEndpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 1, "en")).ConfigureAwait(false);
+        Check("F-M663: eine kaputte ZIP bricht nichts ab — Stufe 1 faellt aus, die Folgenseite traegt die Folge",
+            kaputtHits.Count > 0
+            && kaputtHits.All(h => !h.Id.StartsWith("seasonpack:", StringComparison.Ordinal))
+            && !string.IsNullOrEmpty(kaputtClient.LastSeasonPackError),
+            "Treffer=" + kaputtHits.Count + " Grund=\"" + (kaputtClient.LastSeasonPackError ?? "—") + "\"");
+
+        int kaputtVorher = kaputtHandler.Requests;
+        var kaputtZweiteFolge = await kaputtEndpoint
+            .SearchAsync(new SubtitleQuery("MobLand", null, null, 2, 2, "en")).ConfigureAwait(false);
+        Check("F-M663: die kaputte ZIP wird je Staffel+Sprache EINMAL versucht — die naechste Folge kostet keine neue Anfrage",
+            kaputtHandler.SeasonPages == 1
+            && kaputtHandler.DownloadPages == 1
+            && kaputtHandler.Requests == kaputtVorher
+            && kaputtZweiteFolge.Count == 0,
+            "Staffelseiten=" + kaputtHandler.SeasonPages + " ZIP-Abrufe=" + kaputtHandler.DownloadPages
+            + " Anfragen vorher/nachher=" + kaputtVorher + "/" + kaputtHandler.Requests
+            + " Treffer Folge 2=" + kaputtZweiteFolge.Count);
+
         if (_failures > 0)
         {
 
@@ -844,6 +942,147 @@ internal static class Program
 
         Console.WriteLine($">>> TVSUBTITLES OK: {_checks} Pruefungen bestanden");
         return 0;
+    }
+
+    /// <summary>
+    /// F-M663: eine Staffel-ZIP mit Regular UND HI je Folge. Die Texte unterscheiden sich, damit eine
+    /// Pruefung sehen kann, ob der Griff die richtige Fassung liefert — vertauschte Bytes waeren sonst
+    /// nicht von richtigen zu unterscheiden.
+    /// </summary>
+    private static byte[] BuildSeasonZipFor(int fromEpisode, int toEpisode)
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new System.IO.Compression.ZipArchive(
+            buffer, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            for (int folge = fromEpisode; folge <= toEpisode; folge++)
+            {
+                foreach (bool hi in new[] { false, true })
+                {
+                    string member = "MobLand - 2x" + folge.ToString("00", CultureInfo.InvariantCulture)
+                        + " - Folge." + (hi ? "HI." : string.Empty) + "en.srt";
+                    var bytes = Encoding.UTF8.GetBytes(
+                        "1\n00:00:01,000 --> 00:00:02,000\n" + (hi ? "HI-FASSUNG" : "REGULAR") + "\n");
+                    using var stream = archive.CreateEntry(member).Open();
+                    stream.Write(bytes, 0, bytes.Length);
+                }
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// F-M663: eine Staffel, wie die Seite sie fuehrt — Serienliste, Staffelseite mit dem ZIP-Link, die
+    /// ZIP selbst (die Seite antwortet auf <c>download-…</c> direkt mit ihr) und die Folgenseiten.
+    /// <para>
+    /// Gezaehlt wird JE ART der Anfrage: nur so laesst sich sagen, ob die Staffel EINEN Abruf gekostet
+    /// hat oder einen je Folge. <c>BrokenZip</c> liefert das ZIP-Kennwort mit Muell dahinter — die
+    /// Leseprobe scheitert dann wie an einer halb geladenen Datei.
+    /// </para>
+    /// </summary>
+    private sealed class SeasonPackHandler : HttpMessageHandler
+    {
+        public byte[] Zip { get; set; } = Array.Empty<byte>();
+
+        public bool BrokenZip { get; set; }
+
+        /// <summary>Folgen, fuer die es eine Folgenseite gibt (Einzelweg, Stufe 2).</summary>
+        public HashSet<int> EpisodesOnPages { get; } = new();
+
+        public int ShowLists { get; private set; }
+
+        public int SeasonPages { get; private set; }
+
+        public int DownloadPages { get; private set; }
+
+        public int EpisodeListPages { get; private set; }
+
+        public int EpisodePages { get; private set; }
+
+        public int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests++;
+            var name = Path.GetFileName(request.RequestUri!.AbsolutePath);
+
+            if (name == "add.html")
+            {
+                ShowLists++;
+                return Html("<html><body><select name=\"tvshow\"><option value=\"3234\">MobLand</option></select></body></html>");
+            }
+
+            if (name.StartsWith("subtitle-3234-2-", StringComparison.Ordinal))
+            {
+                SeasonPages++;
+                return Html("<html><body><a href=\"download-3234-2-en.html\">MobLand season 2</a></body></html>");
+            }
+
+            if (name.StartsWith("download-", StringComparison.Ordinal))
+            {
+                DownloadPages++;
+                if (BrokenZip)
+                {
+                    var kaputt = new byte[64];
+                    kaputt[0] = 0x50;
+                    kaputt[1] = 0x4B;
+                    kaputt[2] = 0x03;
+                    kaputt[3] = 0x04;
+                    for (int i = 4; i < kaputt.Length; i++)
+                    {
+                        kaputt[i] = 0x41;
+                    }
+
+                    return Bytes(kaputt);
+                }
+
+                return Bytes(Zip);
+            }
+
+            if (name == "tvshow-3234-2.html")
+            {
+                EpisodeListPages++;
+                return Html("<html><body>" + string.Concat(EpisodesOnPages
+                    .OrderBy(n => n)
+                    .Select(n => "<a href=\"/episode-" + (9000 + n).ToString(CultureInfo.InvariantCulture)
+                        + ".html\">E" + n.ToString(CultureInfo.InvariantCulture) + "</a>")) + "</body></html>");
+            }
+
+            if (name.StartsWith("episode-", StringComparison.Ordinal))
+            {
+                EpisodePages++;
+                int folge = int.Parse(
+                    name.Replace("episode-", string.Empty, StringComparison.Ordinal)
+                        .Replace(".html", string.Empty, StringComparison.Ordinal),
+                    CultureInfo.InvariantCulture) - 9000;
+                string nummer = folge.ToString("00", CultureInfo.InvariantCulture);
+                string body = "<html><body><h2>MobLand 2x" + nummer + "</h2>"
+                    + "<a href=\"/subtitle-" + (500000 + folge).ToString(CultureInfo.InvariantCulture)
+                    + ".html\"><div class=\"subtitlen\"><h5><img src=\"images/flags/en.gif\">MobLand 2x" + nummer
+                    + " (WEB.NeoNoir)</h5></div></a>"
+                    + "<a href=\"/subtitle-" + (600000 + folge).ToString(CultureInfo.InvariantCulture)
+                    + ".html\"><div class=\"subtitlen\"><h5><img src=\"images/flags/en.gif\">MobLand 2x" + nummer
+                    + " (WEB.NeoNoir)</h5><p title=\"downloaded\"><img src=\"images/hi.png\" alt=\"hearing impaired\"></p></div></a>"
+                    + "</body></html>";
+                return Html(body);
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        }
+
+        private static Task<HttpResponseMessage> Html(string body) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "text/html"),
+            });
+
+        private static Task<HttpResponseMessage> Bytes(byte[] payload) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(payload),
+            });
     }
 
     private static byte[] BuildSeasonZip()

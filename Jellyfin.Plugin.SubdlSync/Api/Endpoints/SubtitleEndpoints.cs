@@ -71,13 +71,19 @@ public sealed record SubtitleQuery(
 /// <param name="Rip">Rip/quality cell, empty when the source has none.</param>
 /// <param name="Release">Release name, empty when the source has none.</param>
 /// <param name="FullSeason">True when the offer covers a whole season.</param>
+/// <param name="HearingImpaired">
+/// F-M663: der Treffer ist die HI-Fassung (Ohr-Bild auf der Folgenseite, <c>.HI.</c> im Namen eines
+/// Staffel-ZIP-Eintrags). Der Lauf legt ihn damit auf die HI-Seite und nie auf die regulaere — und
+/// umgekehrt. Vorgabe false, damit jeder vorhandene Aufrufer unveraendert die regulaere Seite meint.
+/// </param>
 public sealed record SubtitleHit(
     SubtitleProvider Provider,
     string Id,
     string Language,
     string Rip,
     string Release,
-    bool FullSeason);
+    bool FullSeason,
+    bool HearingImpaired = false);
 
 /// <summary>
 /// F-M483: the file an endpoint delivers — name and bytes, nothing decoded. The transport never

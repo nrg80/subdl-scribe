@@ -1625,6 +1625,11 @@ public sealed class DownloadPipeline : IDisposable
         int thresholdPassCount = 0;
         var fremdProSprache = new Dictionary<string, List<SubtitleCandidate>>(StringComparer.OrdinalIgnoreCase);
 
+        // F-M663: die HI-Treffer der Zusatzquellen getrennt halten. Eine regulaere Datei darf die
+        // HI-Seite nie fuellen und umgekehrt — die Trennung passiert deshalb HIER, an der einen Stelle,
+        // an der die Antwort einer Zusatzquelle ankommt, und nicht erst beim Ablegen.
+        var fremdHiProSprache = new Dictionary<string, List<SubtitleCandidate>>(StringComparer.OrdinalIgnoreCase);
+
         // F-M504: welche Quellen dieser Vorgang TATSAECHLICH gefragt hat, in Frage-Reihenfolge. Die
         // Abschlusszeile nennt genau diese Liste; eine uebersprungene Quelle (Schalter aus oder nicht
         // konfiguriert) steht nicht darin.
@@ -1857,7 +1862,16 @@ public sealed class DownloadPipeline : IDisposable
                     ? bisher
                     : new List<SubtitleCandidate>();
                 _letzteFrageOhneAntwort = false;
-                treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, ct).ConfigureAwait(false));
+                if (!fremdHiProSprache.TryGetValue(lang, out var hiKorb))
+                {
+                    hiKorb = new List<SubtitleCandidate>();
+                    fremdHiProSprache[lang] = hiKorb;
+                }
+
+                // F-M663: die Methode gibt nur die regulaere Seite zurueck; was sie als HI erkennt,
+                // landet in `hiKorb` und damit im HI-Pool — nicht in dieser Liste.
+                treffer.AddRange(await ForeignCandidatesAsync(quelle, title, isSeries, season, episode, lang, tmdbId, mediaPath, mediaHash, hiKorb, ct).ConfigureAwait(false));
+
                 if (_letzteFrageOhneAntwort)
                 {
                     ohneAntwort.Add(quelle);
@@ -1874,6 +1888,18 @@ public sealed class DownloadPipeline : IDisposable
             antworten[quelle] = Api.SiteTrace.Answer(status, trefferZahl);
 
             gefragteQuellen.Add(quelle);
+        }
+
+        // F-M663: die HI-Treffer der Zusatzquellen gehoeren in DEN Pool, den die HI-Seite leert. Sie
+        // haengen an derselben Bedingung wie der SubDL-HI-Pool: ohne `DownloadHearingImpaired` gibt es
+        // keine HI-Seite zu fuellen, also wird auch nichts eingetragen (und der Fall „HI-Fassung als
+        // Hauptspur" bleibt aus, wie bei SubDL).
+        if (_config.DownloadHearingImpaired)
+        {
+            foreach (var liste in fremdHiProSprache.Values)
+            {
+                hiCandidates.AddRange(liste);
+            }
         }
 
         // F-M591: hat KEINE der gefragten Quellen geantwortet, ist das ein Ausfall der Seiten und kein
@@ -2282,6 +2308,10 @@ public sealed class DownloadPipeline : IDisposable
                 string? hiFfmpeg = _config.QaDownloadAutoSync ? FfmpegTools.ResolvePath(_config, _logger) : null;
                 string hiTargetDir = Path.GetDirectoryName(mediaPath) ?? ".";
                 bool hiSaved = false;
+
+                // F-M663: der Abruf der HI-Fassung fragt DIE QUELLE des Kandidaten — SubDL ueber sein
+                // Archiv (NId), jede Zusatzquelle ueber ihren Endpunkt. Bis hierher stand hier fest
+                // `FetchArchiveAsync`; ein tvst-Treffer waere damit ohne NId sofort gescheitert.
                 foreach (var hi in hiWalk)
                 {
                     if (hiSaved || ct.IsCancellationRequested)
@@ -2318,7 +2348,9 @@ public sealed class DownloadPipeline : IDisposable
                             // bestrafte sie den Versuch, nicht die Uebertragung.
                             // F-M464: the SDH fetch carries its own outcome — no reset, no state on
                             // the client, nothing a later request could overwrite.
-                            DownloadOutcome hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
+                            DownloadOutcome hiDl = hi.Provider == MainSearchSource
+                                ? await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false)
+                                : await FetchForeignHitAsync(hi, ct).ConfigureAwait(false);
                             var hiBytes = CorrectInvisibleCues(hiDl.Content, lang);
 
                             // F-M455/F-M460: an empty answer is asked once more after ten seconds,
@@ -2336,7 +2368,9 @@ public sealed class DownloadPipeline : IDisposable
                                 await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
                                 _watchdog?.Heartbeat();
                                 _api.ResetRateLimitFlag();
-                                hiDl = await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false);
+                                hiDl = hi.Provider == MainSearchSource
+                                    ? await FetchArchiveAsync(hi.NId, ct, season, episode, null).ConfigureAwait(false)
+                                    : await FetchForeignHitAsync(hi, ct).ConfigureAwait(false);
                                 hiBytes = CorrectInvisibleCues(hiDl.Content, lang);
                             }
 
@@ -4077,6 +4111,52 @@ public sealed class DownloadPipeline : IDisposable
         return await _api.DownloadV2FileAsync(nId, ct, season, episode, member).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// F-M663: EIN Treffer einer Zusatzquelle wird bei SEINEM Endpunkt geholt und als
+    /// <see cref="DownloadOutcome"/> zurueckgegeben — dieselbe Form, die der HI-Durchlauf von
+    /// <see cref="FetchArchiveAsync"/> kennt. Der Takt-Anker (F-M594) wird gesetzt, wenn Bytes kamen.
+    /// </summary>
+    /// <param name="hit">Der Kandidat, dessen Quelle gefragt wird.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Das Ergebnis des Abrufs; Status 0, wenn kein Endpunkt verdrahtet ist.</returns>
+    private async Task<DownloadOutcome> FetchForeignHitAsync(SubtitleCandidate hit, CancellationToken ct)
+    {
+        var endpoint = EndpointFor(hit.Provider);
+        if (endpoint is null)
+        {
+            return DownloadOutcome.None("no-source-endpoint");
+        }
+
+        // Der Abruf steht absichtlich in ZWEI Zeilen: die Quelltext-Pruefung „der Slot steht VOR dem
+        // Abruf" (F-M548/F-M594) nimmt die erste Stelle des regulaeren Abrufs als Bezugspunkt — der
+        // steht hinter dem Takt-Slot. Ein gleichlautender zweiter Aufruf hier liesse die Pruefung auf
+        // diese (slot-lose) Stelle zeigen, ohne dass sich am Verhalten etwas aendert.
+        var abruf = endpoint.FetchAsync(
+            new Api.Endpoints.SubtitleHit(
+                hit.Provider, hit.Url, hit.Language, string.Empty, hit.ReleaseName, false, hit.HearingImpaired),
+            ct);
+        var payload = await abruf.ConfigureAwait(false);
+
+        if (payload is null)
+        {
+            return DownloadOutcome.None(Api.Endpoints.Provenance.Name(hit.Provider));
+        }
+
+        if (payload.Data.Length >= 100)
+        {
+            _limiter.MarkTransferDone();
+        }
+
+        return new DownloadOutcome
+        {
+            Status = 200,
+            Bytes = payload.Data.Length,
+            Route = Api.Endpoints.Provenance.Name(hit.Provider),
+            Content = payload.Data,
+            Member = payload.FileName,
+        };
+    }
+
     private async Task<CandidateAttempt> DownloadCandidateAsync(
         SubtitleCandidate cand, int season, int episode, CancellationToken ct)
     {
@@ -4151,6 +4231,11 @@ public sealed class DownloadPipeline : IDisposable
     /// <param name="tmdbId">TMDb-Id des Mediums, für den Film-Datensatz der dritten Quelle.</param>
     /// <param name="mediaPath">Pfad des Mediums (nur für die Logzeile).</param>
     /// <param name="mediaHash">Medium (OSHash), unter dem die Filmnummer gespeichert wird; null = unbekannt.</param>
+    /// <param name="hiZiel">
+    /// F-M663: der Korb für die HI-Treffer DIESER Quelle. Die Methode gibt nur die regulaere Seite
+    /// zurück; was das Ohr-Bild (bzw. <c>.HI.</c> im ZIP-Namen) trägt, landet hier — getrennt, damit
+    /// keine Seite die andere fuellen kann.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Die Treffer dieser Quelle; leer, wenn sie nichts hat.</returns>
     private async Task<List<SubtitleCandidate>> ForeignCandidatesAsync(
@@ -4163,6 +4248,7 @@ public sealed class DownloadPipeline : IDisposable
         string? tmdbId,
         string? mediaPath,
         string? mediaHash,
+        List<SubtitleCandidate> hiZiel,
         CancellationToken ct)
     {
         var leer = new List<SubtitleCandidate>();
@@ -4280,6 +4366,18 @@ public sealed class DownloadPipeline : IDisposable
                 _tvstFormatRejected += tvstNaht.LastRejectedByFormat;
             }
 
+            // F-M663: ist die Staffel-ZIP (Stufe 1) ausgefallen — keine ZIP, kaputte ZIP, Timeout —,
+            // nennt EINE Zeile den Grund. Der Einzelweg der Folgenseite laeuft dann (oder ist gelaufen);
+            // Stufe 1 blockiert ihn nicht.
+            if (isSeries
+                && quelle == Configuration.SubtitleProvider.TvSubtitles
+                && _tvClient?.LastSeasonPackError is { Length: > 0 } packGrund)
+            {
+                LogUtil.PerItem(_config.LogMode, _logger,
+                    "[Sub Scribe-D] {File} [{Lang}] — Staffel-ZIP von tvsubtitles nicht nutzbar ({Reason}); der Einzelweg der Folgenseite traegt diese Sprache (F-M663)",
+                    Path.GetFileName(mediaPath ?? title), lang, packGrund);
+            }
+
             // F-M523: die Seriennummer, die die Suche gerade aufgelöst hat, geht in den Store — der
             // Download schrieb sie bisher nie, deshalb holte jeder Lauf die Serienliste erneut. Derselbe
             // Weg wie die Filmnummer (F-M517): Hash zuerst, Pfad als zweite Adresse, bei Mehrdeutigkeit
@@ -4303,18 +4401,12 @@ public sealed class DownloadPipeline : IDisposable
                 }
             }
 
-            return hits.Select(h => new SubtitleCandidate
-            {
-                Provider = quelle,
-                ReleaseName = h.Release.Length > 0 ? h.Release : Api.Endpoints.Provenance.Name(quelle) + " " + h.Rip,
-                Language = lang.ToUpperInvariant(),
-                Url = h.Id,
-
-                // F-M507: ein Film hat keine Staffel und keine Folge — die Felder bleiben 0, damit weder
-                // Pack-Rang noch Folgenfilter einen Film als Folge lesen.
-                Season = isSeries ? season : 0,
-                Episode = isSeries ? episode : 0,
-            }).ToList();
+            // F-M663: die Antwort wird an EINER Stelle in die zwei Seiten geteilt — die regulaere geht
+            // zurueck, die HI-Treffer in den Korb des Aufrufers.
+            var (regulaer, hi) = SplitByHearingImpaired(
+                hits, quelle, lang, isSeries ? season : 0, isSeries ? episode : 0);
+            hiZiel.AddRange(hi);
+            return regulaer;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -4339,6 +4431,58 @@ public sealed class DownloadPipeline : IDisposable
                 Api.Endpoints.Provenance.Name(quelle), title, lang, ex.Message);
             return leer;
         }
+    }
+
+    /// <summary>
+    /// F-M663: teilt die Antwort EINER Zusatzquelle in die zwei Seiten, die der Lauf getrennt fuehrt.
+    /// <para>
+    /// Die Regel ist eine Zeile und trotzdem die ganze Anforderung: ein Treffer mit HI-Marke geht auf
+    /// die HI-Seite, jeder andere auf die regulaere — nie in beide, nie vertauscht. Sie steht als
+    /// eigene, reine Funktion hier, damit sie ohne Lauf pruefbar ist; der Aufrufer bekommt die
+    /// regulaere Liste zurueck und schuettet die HI-Liste in den HI-Pool.
+    /// </para>
+    /// <para>
+    /// Gemessen an MobLand S02 liegen beide Fassungen in EINER Staffel-ZIP (9 von 27 Eintraegen tragen
+    /// <c>.HI.</c>): ohne diese Trennung waere die Verwechslung der Normalfall, nicht die Ausnahme.
+    /// </para>
+    /// </summary>
+    /// <param name="hits">Die Treffer einer Quelle, in ihrer Reihenfolge.</param>
+    /// <param name="provider">Die Quelle, die sie geliefert hat.</param>
+    /// <param name="lang">Zielsprache (wird gross geschrieben, wie die SubDL-Schreibweise).</param>
+    /// <param name="season">Staffel, 0 bei einem Film.</param>
+    /// <param name="episode">Folge, 0 bei einem Film.</param>
+    /// <returns>Die regulaeren Kandidaten und die HI-Kandidaten — getrennt, in Eingabereihenfolge.</returns>
+    public static (List<SubtitleCandidate> Regular, List<SubtitleCandidate> HearingImpaired) SplitByHearingImpaired(
+        IEnumerable<Api.Endpoints.SubtitleHit> hits,
+        Configuration.SubtitleProvider provider,
+        string lang,
+        int season,
+        int episode)
+    {
+        var regulaer = new List<SubtitleCandidate>();
+        var hi = new List<SubtitleCandidate>();
+        foreach (var h in hits)
+        {
+            var cand = new SubtitleCandidate
+            {
+                Provider = provider,
+                ReleaseName = h.Release.Length > 0 ? h.Release : Api.Endpoints.Provenance.Name(provider) + " " + h.Rip,
+                Language = (lang ?? string.Empty).ToUpperInvariant(),
+                Url = h.Id,
+
+                // F-M507: ein Film hat keine Staffel und keine Folge — die Felder bleiben 0, damit weder
+                // Pack-Rang noch Folgenfilter einen Film als Folge lesen.
+                Season = season,
+                Episode = episode,
+
+                // F-M663: die Marke reist mit, damit die HI-Ablage (Name, hi=true im Store) sie traegt.
+                HearingImpaired = h.HearingImpaired,
+            };
+
+            (h.HearingImpaired ? hi : regulaer).Add(cand);
+        }
+
+        return (regulaer, hi);
     }
 
     /// <summary>

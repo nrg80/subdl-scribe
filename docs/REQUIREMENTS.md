@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.2.0.21.
+**Status:** Implementation — v12.2.0.22.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -41,7 +41,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
 - [19. Test Library](#19-test-library)
 - [21. Adding another endpoint — checklist and pitfalls](#21-adding-another-endpoint--checklist-and-pitfalls) — 1 requirement (F-M564) + Checkliste
 
-- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 33 requirements
+- [22. Subtitle Sources — one contract](#22-subtitle-sources--one-contract) — 34 requirements
 - [20. References](#20-references)
 
 ## 1. Objective and Scope
@@ -3115,3 +3115,13 @@ Bleibt neben einer geschlossenen Quelle eine offene übrig, sammelt der Slot wei
 - Auf der Folgenseite steht HI **nur** als Bild: `<img src="images/hi.png" alt="hearing impaired">` (Eintrag `subtitle-330930`), während der Regular-Eintrag daneben (`subtitle-330929`) identisch heißt — ohne das Bild ist er nicht zu unterscheiden.
 
 Der Client bietet dafür `DownloadSeasonArchiveAsync(showId, season, language)` (Staffelseite als Cookie-Vorbedingung, dann die ZIP) und `ReadSeasonArchive(byte[])` (Folge, Sprache und `HearingImpaired` je `.srt`-Eintrag); `ParseEntries` setzt `TvSubtitlesEntry.HearingImpaired` aus dem Ohr-Bild. Geprüft in `tvsubtitles` (Ohr-Bild an/aus, ZIP mit Regular und HI). Die Einordnung in den Lauf — Reihenfolge der Quellen nach GUI, innerhalb tvst die Staffel-ZIP vor dem Einzeleintrag — folgt als eigener Schritt.
+
+**F-M663 [D]:** **Die Download-Seite nimmt die tvst-Staffel-ZIP als STUFE 1 — ein Abruf je Serie, Staffel und Sprache statt einem je Folge, und Regular und HI bleiben getrennt.** Gemessen am 21.11.2026 an MobLand S02 (610.807 B, 27 Einträge, 9 Folgen, 9 davon mit `.HI.`):
+
+- Bisher fragte die Suche je Folge die Folgenseite (`EpisodePagesAsync` → `EpisodeLabelAsync` → `EntriesAsync`) — für 9 Folgen einer Sprache neunmal dieselbe Frage an dieselbe Staffel. Jetzt holt `TvSubtitlesDownloadEndpoint.SearchAsync` zuerst die Staffel-ZIP (`TvSubtitlesClient.SeasonPackAsync`, Merker je `(Serie, Staffel, Sprache)` **pro Lauf**) und bildet je `.srt`-Eintrag einen Treffer mit dem Griff `seasonpack:<serie>:<staffel>:<sprache>:<nummer>`. Der Abruf dieses Treffers liest den Eintrag aus dem Merker (`DownloadPackMemberAsync`) — **keine zweite Anfrage**. Gemessen: fünf Folgen einer Staffel kosten drei Anfragen (Serienliste, Staffelseite, ZIP) und keine einzige Folgenseite.
+- Die Zuordnung folgt allein der Marke: `.HI.` im Namen → HI-Seite, sonst reguläre Seite (`DownloadPipeline.SplitByHearingImpaired`, eine reine Funktion). Beide Arten laufen durch dieselben Tore (Sprache und Rip gegen das Vokabular der Seite in der Naht, QA, Sprache und Rangfolge im Lauf). Eine reguläre Datei füllt nie die HI-Seite und umgekehrt.
+- STUFE 2 (der bisherige Einzelweg) läuft für **jede Seite weiter, die Stufe 1 nicht gedeckt hat**: fehlt die Folge in der ZIP, fehlt dort nur die HI-Fassung, oder ist die ZIP unbrauchbar, wird die Folgenseite weiter gefragt. Eine fehlende oder kaputte ZIP bricht nichts ab — sie kostet eine Zeile mit Grund (`LastSeasonPackError`) und fällt für dieses (Serie, Staffel, Sprache) aus; der Fehlschlag wird mitgemerkt, damit nicht die nächste Folge dieselbe tote Adresse erneut fragt.
+- Die Reihenfolge der QUELLEN bleibt die GUI-Einstellung (`Configuration.DownloadOrder` / `quellenReihenfolge`); innerhalb tvst steht die Staffel-ZIP vor dem Einzeleintrag. Der HI-Pool behält seine eigene Ordnung (F-M474: Rang samt Preis und Breite vor dem Textscore) — die Quellen-Reihenfolge der regulären Seite wird auf ihn NICHT übertragen.
+- Ein ZIP-Eintrag trägt keine sid. Für ihn gibt es deshalb keinen „Report bad"-Weg: ein Formatbefund wird gezählt (`LastRejectedByFormat`) und der Eintrag fällt weg, gemeldet wird nichts — eine erfundene Nummer wäre schlimmer als kein Bericht.
+
+Geprüft in `tvsubtitles` (ein Abruf je Staffel und Sprache statt je Folge über einen zählenden Handler, Folge fehlt in der ZIP → Einzelweg greift, HI und Regular getrennt bis zu den Bytes, kaputte ZIP → kein Abbruch) und `endpoints` (Trennfunktion, Griff-Erkennung, Naht im Quelltext).
