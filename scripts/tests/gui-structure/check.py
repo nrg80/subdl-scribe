@@ -1924,9 +1924,11 @@ def main():
     # an tvsubtitles.net (eigene Meldeform "Report bad"), deshalb traegt er keinen Merker mehr.
     # F-M641: "Upload season packs" ist ebenfalls NICHT mehr SubDL-only — seit dem 20.11.2026 baut
     # auch tvsubtitles.net Packs, der Schalter gibt beide Quellen frei.
+    # F-M665 (Operator 21.11.2026: „die tvst-Staffel-ZIP in denselben Platten-Cache … source
+    # unabhängig"): die zwei Archiv-Cache-Felder tragen KEINEN Quellenmerker mehr — der Cache dient
+    # jeder Engine, die Quelle steckt im Schlüsselraum (tvst.<Serie>.<Staffel>.<Sprache>).
     subdl_only = ("UploadContinueAfterLimit", "DownloadContinueAfterLimit",
-                  "DownloadHearingImpaired", "AllowAiTranslatedSubs",
-                  "DownloadArchiveCacheDays", "DownloadArchiveCacheMaxMb")
+                  "DownloadHearingImpaired", "AllowAiTranslatedSubs")
     for cid in subdl_only:
         # Der Merker steht mal hinter dem Kaestchen (Checkbox), mal im Label DAVOR (Zahlenfeld) —
         # gesucht wird deshalb in einem Fenster um das Control, nicht nur dahinter.
@@ -1966,8 +1968,9 @@ def main():
 
     # F-M533: der Melde-Schalter wirkt auf BEIDE Quellen und darf keinen Quellenmerker tragen.
     check("F-M533: the report switch carries no source marker any more",
-          page_src.count('>SubDL only</span>') == 6,
-          "%d Abzeichen (erwartet 6 nach dem Melde- und dem Pack-Schalter)" % page_src.count('>SubDL only</span>'))
+          page_src.count('>SubDL only</span>') == 4,
+          "%d Abzeichen (erwartet 4: Tageslimit x2, HI, AI — Melde-, Pack- und Cache-Felder tragen keins)"
+          % page_src.count('>SubDL only</span>'))
     check("F-M533: the report switch is named without a source",
           "<span>Report broken subtitles</span>" in page_src)
 
