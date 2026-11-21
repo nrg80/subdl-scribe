@@ -9,12 +9,12 @@
     "imageUrl": "https://raw.githubusercontent.com/nrg80/sub-scribe/main/logo.png",
     "versions": [
       {
-        "version": "12.2.0.26",
-        "changelog": "v12.2.0.26: the hearing-impaired switch stops claiming a source (tvsubtitles delivers HI too) and the two archive-cache descriptions state the defaults the code uses, 7 days and 256 MB, instead of 14 and 512 (F-M664, F-M665).",
+        "version": "12.2.0.27",
+        "changelog": "v12.2.0.27: the refetch now counts the upload postprocessing — while a postprocessing order is armed or a postprocessing run is working, the refetch fire is deferred, with that reason in the log and on the status line, instead of starting a cycle beside it; a slot never starts the postprocessing's work in parallel and stays claimable (F-M666).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.26-dev/Jellyfin.Plugin.SubdlSync_12.2.0.26.zip",
-        "checksum": "cbcffa27fe3b6574bcf74d3d8875db9e",
-        "timestamp": "2026-11-21T09:14:21Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.27-dev/Jellyfin.Plugin.SubdlSync_12.2.0.27.zip",
+        "checksum": "a3cefa833bf6cc7a0836d1fda1c50052",
+        "timestamp": "2026-11-21T11:02:47Z"
       }
     ]
   }
