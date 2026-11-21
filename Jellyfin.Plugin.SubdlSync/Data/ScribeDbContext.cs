@@ -667,6 +667,10 @@ public sealed class ScribeDbContext : IDisposable
                      ("CompleteTvSubtitles", "ALTER TABLE media ADD COLUMN CompleteTvSubtitles TEXT NULL;"),
                      ("CompleteMsub", "ALTER TABLE media ADD COLUMN CompleteMsub TEXT NULL;"),
                      ("CompleteSignature", "ALTER TABLE media ADD COLUMN CompleteSignature TEXT NULL;"),
+
+                     // F-M661: der Tag, an dem die Suche fuer diese Datei zuletzt LEER ausging —
+                     // ein eigenes Urteil neben dem Such-Stempel, weil es den Takt verlaengert.
+                     ("LastSearchEmptyUtc", "ALTER TABLE media ADD COLUMN LastSearchEmptyUtc TEXT NULL;"),
                  })
         {
             try

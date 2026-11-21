@@ -1,7 +1,7 @@
 # Requirements Specification — Jellyfin Plugin "Sub Scribe" (Upload + Download)
 **Project:** Native Jellyfin plugin: automatic upload of embedded subtitles to SubDL.com + download pipeline for missing external subtitles — both in ONE plugin
 **Version:** 2.142
-**Status:** Implementation — v12.2.0.20.
+**Status:** Implementation — v12.2.0.21.
 
 **Die Begründungen (warum eine Regel gilt, Messungen, Vorfälle) stehen nicht hier, sondern lokal in der Methodik-Ablage, nach Kapiteln sortiert und mit der Requirement-Nummer
 markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test — sonst nichts.**
@@ -17,7 +17,7 @@ markiert. Dieses Dokument nennt die Regel, die Konstante, den Grund und den Test
  - [3.2 Dry Run — Upload](#32-dry-run-upload) — 3 requirements
  - [3.3 Season Packs — Upload](#33-season-packs-upload) — Querschnitt, zitiert F-M379–F-M448 und F-M475, F-M476
  - [3.4 Upload completion criteria](#34-upload-completion-criteria) — 26 requirements (F-M557–F-M563, F-M571–F-M577, F-M580–F-M592)
-- [4. Download Pipeline](#4-download-pipeline) — 92 requirements
+- [4. Download Pipeline](#4-download-pipeline) — 93 requirements
  - [4.1 Quality Gates — Download](#41-quality-gates-download) — 32 requirements
  - [4.2 Dry Run — Download](#42-dry-run-download) — 1 requirement
  - [4.3 Auto-Sync — Download](#43-auto-sync-download) — 20 requirements
@@ -590,6 +590,13 @@ A failed HI search keeps the regular candidates and logs it — the HI variant i
 A dry run reports the HI pick from the HI pool; the real selection happens after the file download, which a dry run never reaches.
 
 **F-M47 [D]:** **Configurable refetch interval:** manual / daily / weekly / monthly. **Default: Weekly.** The per-file last-search stamp (the last-search stamp and the stored language list) protects already-downloaded languages and controls re-search. The unified cycle interval governs both directions; the per-direction refetch property is carried for XML compatibility only and read by no code path.
+
+**F-M661 [D]:** **An empty answer buys a longer clock.** When a run asked every configured source for a file and *none* returned a candidate, that verdict is stored as its own stamp (`LastSearchEmptyUtc`, late column on `media`) and the item is due again only after **seven times** the configured refetch gap (capped at 30 days) instead of the plain gap. The rule exists because the plain interval spent the whole search budget on the same empty questions: measured on 21.11.2026, a daily gap meant **2.015 SubDL searches per run** for **1.160 targets**, of which **1.128** came back empty (`no candidates`).
+
+- **The mark rides on a search that really ran** — it is only written when a search stamp exists *and* the main source was actually asked this run, and never in a dry run (same guard as the stamp itself, F-M504). An item that was never asked is not deferred.
+- **Any search that returns something clears it** (`MarkSearched`), and so do the reset paths (single-file reset, `ResetAll`, dead-item prune). The longer clock is never a verdict about the *title*, only a pause on asking.
+- **A new file is a new record**: a freshly arrived episode has no stamp at all and is searched at once, so the delay never touches an arrival.
+- Per-item evidence is logged as `SEARCH deferred <file> — the search came back empty, so the next ask waits <n> day(s) instead of <gap> (F-M661)`.
 
 **F-M215 [D]:** **A season or range pack is resolved to the episode it belongs to — never saved whole.** A pack must yield exactly one subtitle file per episode, chosen from the pack's own listing:
 

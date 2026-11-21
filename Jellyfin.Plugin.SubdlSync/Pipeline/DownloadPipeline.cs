@@ -2019,6 +2019,26 @@ public sealed class DownloadPipeline : IDisposable
                     : string.Join(", ", gefragteQuellen.Select(q =>
                         Api.Endpoints.Provenance.Name(q)
                         + (antworten.TryGetValue(q, out var a) ? " (" + a + ")" : string.Empty))));
+
+            // F-M661 (Messung 21.11.2026): 1.160 Ziele, 1.128 davon leer — bei taeglichem Takt
+            // wurden 2.015 SubDL-Suchen je Lauf fuer dieselben leeren Fragen ausgegeben. Ein leerer
+            // Korb ist ein Urteil, das den naechsten Lauf ueberspringen darf: der Merker verlaengert
+            // den Takt (EmptyGap), jede Suche MIT Treffer raeumt ihn ueber MarkSearched wieder weg.
+            // Nur stempeln, wenn die Hauptsuche wirklich gefragt wurde und es kein Trockenlauf ist —
+            // dieselbe Bedingung wie beim Such-Stempel daneben (F-M504).
+            if (!_config.DownloadDryRun
+                && gefragteQuellen.Contains(MainSearchSource)
+                && _searchTracker.MarkSearchEmpty(item.Id.ToString()))
+            {
+                LogUtil.PerItem(
+                    _config.LogMode,
+                    _logger,
+                    "[Sub Scribe-D] SEARCH deferred {File} — the search came back empty, so the next ask waits {Days} day(s) instead of {Gap} (F-M661)",
+                    Path.GetFileName(mediaPath),
+                    DownloadSearchTracker.EmptyGap(refetchGap).TotalDays,
+                    refetchGap.TotalDays);
+            }
+
             return;
         }
 

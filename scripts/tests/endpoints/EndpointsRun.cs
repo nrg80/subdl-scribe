@@ -1028,6 +1028,25 @@ internal static class Program
             !uploadSource.Contains("ExtractAllStreamsAsync", StringComparison.Ordinal)
             && !uploadSource.Contains("private List<MediaStream> GetTextSubtitleStreams", StringComparison.Ordinal));
 
+        // --- F-M661: ein leerer Korb verlaengert den Takt ---------------------------------------------
+        var tracker661 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Registry/DownloadSearchTracker.cs"));
+        Check("F-M661: der Leer-Merker ist eine eigene spaete Spalte an media",
+            ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/Entities.cs"))
+                .Contains("public DateTime? LastSearchEmptyUtc { get; set; }", StringComparison.Ordinal)
+            && ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Data/ScribeDbContext.cs"))
+                .Contains("(\"LastSearchEmptyUtc\", \"ALTER TABLE media ADD COLUMN LastSearchEmptyUtc TEXT NULL;\")", StringComparison.Ordinal));
+        Check("F-M661: der Takt waechst nur bei leerer Antwort — Faktor sieben, gedeckelt bei 30 Tagen",
+            tracker661.Contains("public const int EmptySearchFactor = 7;", StringComparison.Ordinal)
+            && tracker661.Contains("Math.Min(30d, gap.TotalDays * EmptySearchFactor)", StringComparison.Ordinal)
+            && tracker661.Contains("TimeSpan effective = media.LastSearchEmptyUtc != null ? EmptyGap(gap) : gap;", StringComparison.Ordinal));
+        Check("F-M661: ein Treffer raeumt den Leer-Merker, die Reset-Wege raeumen mit",
+            tracker661.Contains("media.LastSearchEmptyUtc = null;", StringComparison.Ordinal)
+            && tracker661.Contains("public bool MarkSearchEmpty(string itemId)", StringComparison.Ordinal));
+        Check("F-M661: gestempelt wird nur nach einer wirklich gestellten Frage und nie im Trockenlauf",
+            downloadSource.Contains("&& gefragteQuellen.Contains(MainSearchSource)", StringComparison.Ordinal)
+            && downloadSource.Contains("_searchTracker.MarkSearchEmpty(item.Id.ToString())", StringComparison.Ordinal)
+            && downloadSource.Contains("SEARCH deferred {File} — the search came back empty", StringComparison.Ordinal));
+
         // --- F-M660: der Datei-Reset kann die Staffel-Urteile der Pack-Phase mitnehmen ---------------
         var reset660 = ReadText(Path.Combine(root2, "Jellyfin.Plugin.SubdlSync/Api/ScribeReset.cs"));
         Check("F-M660: die Route nimmt 'pack' als eigenen Wert und meldet die Zahl zurueck",

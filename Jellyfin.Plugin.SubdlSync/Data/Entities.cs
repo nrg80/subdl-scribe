@@ -290,6 +290,14 @@ public class MediaEntity
     /// <summary>Target-language list the last search was made for.</summary>
     public string? LastSearchLanguages { get; set; }
 
+    /// <summary>
+    /// F-M661: last time a search for this file came back EMPTY — no candidate from any source.
+    /// An empty answer is re-asked on a longer clock than the configured refetch interval, so a
+    /// library full of titles no source carries does not spend its whole search budget on the same
+    /// empty questions at every run. Cleared by any search that does return something.
+    /// </summary>
+    public DateTime? LastSearchEmptyUtc { get; set; }
+
     /// <summary>Last time this media record was seen/updated.</summary>
     public DateTime LastSeen { get; set; } = DateTime.UtcNow;
 }
