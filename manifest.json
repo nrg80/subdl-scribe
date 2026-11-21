@@ -12,9 +12,9 @@
         "version": "12.2.0.20",
         "changelog": "v12.2.0.20: the file reset can clear the pack-phase season verdicts too, selectable in the dropdown (F-M660).",
         "targetAbi": "12.1.0.0",
-        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.20-dev/Jellyfin.Plugin.SubdlSync_12.2.0.20.zip",
-        "checksum": "c33c0488933f4971e0c0501cfb481ed7",
-        "timestamp": "2026-11-20T23:06:04Z"
+        "sourceUrl": "https://github.com/nrg80/sub-scribe/releases/download/v12.2.0.20/Jellyfin.Plugin.SubdlSync_12.2.0.20.zip",
+        "checksum": "8c29e2da79695bd17c50e23f46431d45",
+        "timestamp": "2026-11-21T06:29:51Z"
       }
     ]
   }
