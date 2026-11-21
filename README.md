@@ -100,8 +100,8 @@ scripts/release.sh --dry-run   # build + verify, touch nothing
 scripts/release.sh             # the real thing
 ```
 
-The branch picks the channel: `develop` publishes a prerelease (`v<ver>-dev`), `main` publishes the
-stable release. See [Branches](docs/RELEASE.md#branches) for what that means for installs.
+Releases come from `main`. The repository URL above serves that line, so what the catalog offers is
+always what is on `main`.
 
 Do not release by tagging and pushing alone: a release must carry exactly one asset. See [docs/RELEASE.md](docs/RELEASE.md).
 
